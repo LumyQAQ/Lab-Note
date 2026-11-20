@@ -9,13 +9,12 @@ from contextlib import contextmanager, closing
 from copy import deepcopy
 from datetime import date, datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
+from platform_config import TZ
 from medium import merge_medium, recipe_key, saved_media
 from cell_count import normalize_count
 from group_units import DISH_TYPES, GROUP_TYPES, group_keys, group_quantity, member_active, normalize_quantity, resize_members
 from manual_groups import apply_merge, apply_unmerge, begin_projection, commit_projection, get_display_group
 
-TZ = ZoneInfo('Asia/Shanghai')
 LAYOUTS = {'6孔板': (2, 3), '12孔板': (3, 4), '24孔板': (4, 6),
            '48孔板': (6, 8), '96孔板': (8, 12)}
 TYPES = ['T25', 'T75', 'T175', *DISH_TYPES, *LAYOUTS]
@@ -560,6 +559,8 @@ class Store:
                 snapshot_id = existing['id']
             else:
                 state = json.loads(conn.execute('SELECT body FROM current_state WHERE id=1').fetchone()[0])
+                if source=='auto' and state['revision']==0:
+                    return None  # A never-used notebook has no day to archive.
                 if expected_revision is not None and state['revision'] != expected_revision:
                     raise Conflict('记录已变化，请刷新后再保存快照')
                 active = [c for c in state['containers'] if c['status'] == 'active']

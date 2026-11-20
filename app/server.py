@@ -2,12 +2,16 @@
 """Personal notebook served on the loopback interface."""
 import argparse
 import csv
+import errno
 import html
 import io
 import json
 import mimetypes
+import os
 import secrets
+import socket
 import sqlite3
+import sys
 import threading
 import traceback
 import zipfile
@@ -17,15 +21,18 @@ from pathlib import Path
 from datetime import date
 from urllib.parse import urlparse, parse_qs
 
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0,str(ROOT))
 from store import Store, Conflict, current_time, day_number, TYPES, LAYOUTS
 from medium import medium_summary
 from cell_count import count_summary,estimate_total,seeding_summary
 from lab_records import load_schema
 from lab_exports import record_html, SOFTWARE_CREDIT
 from group_units import member_active
+from platform_config import default_data_dir, port_value
 
-ROOT = Path(__file__).resolve().parent
-DEFAULT_DATA = Path.home() / 'Library' / 'Application Support' / 'Culture Notes Share'
+DEFAULT_DATA = default_data_dir()
 
 
 def export_rows(state, record_date):
@@ -54,6 +61,10 @@ def export_rows(state, record_date):
                              count_summary(w.get('cell_count')),'整个培养单元（非单组分计数）' if w.get('components') else '培养单元',
                              '\n'.join(t['name']+' '+t.get('concentration','')+' / 开始 '+t['started_at'] for t in w.get('active_treatments',[])) if c['status']=='active' and member_active(w) else '培养已结束',grouping.get(c['id'],''),seeding_summary(w.get('seeding'))])
     return rows
+
+
+class PortUnavailable(OSError):
+    """The loopback listener could not bind the requested port."""
 
 
 def make_server(data_dir=DEFAULT_DATA, port=8875):
@@ -93,6 +104,8 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
                 if path in ('/notebook.webmanifest','/notebook-256.png','/notebook-512.png'):
                     mime='application/manifest+json' if path.endswith('.webmanifest') else 'image/png'
                     return self.send(200,(ROOT/'static'/path[1:]).read_bytes(),mime)
+                if path == '/api/health':
+                    return self.send(200,{'app':'lab-culture-v1','data_dir':str(store.directory),'pid':os.getpid()})
                 if path == '/api/state':
                     backups = sorted(store.directory.joinpath('backups').glob('*.sqlite3'), reverse=True)
                     self.send(200, {'app':'lab-culture-v1', 'state':store.state(), 'token':token,
@@ -206,6 +219,10 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
                 data = json.loads(self.rfile.read(size))
                 if not isinstance(data, dict):
                     raise ValueError('无效请求')
+                if self.path == '/api/stop':
+                    self.send(200,{'stopping':True})
+                    self.server.shutdown()
+                    return
                 if self.path == '/api/command':
                     state = store.mutate(data.get('action'), data.get('payload', {}), data.get('revision'))
                     result={'state':state,'undo':store.undo_info(),'workday':store.workday(),
@@ -239,6 +256,17 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
 
     class LocalListener(ThreadingHTTPServer):
         request_queue_size = 64
+        allow_reuse_address = os.name != 'nt'
+
+        def server_bind(self):
+            if os.name=='nt':
+                self.socket.setsockopt(socket.SOL_SOCKET,socket.SO_EXCLUSIVEADDRUSE,1)
+            try:
+                super().server_bind()
+            except OSError as error:
+                if error.errno in (errno.EADDRINUSE,errno.EACCES) or getattr(error,'winerror',None) in (10013,10048):
+                    raise PortUnavailable(str(error)) from error
+                raise
 
     server = LocalListener(('127.0.0.1', port), Handler)
     server.store = store
@@ -247,7 +275,8 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--port', type=int, default=8875)
+    parser.add_argument('--port',type=lambda v: 0 if v=='0' else port_value(v),default=8875)
+    parser.add_argument('--ready-file',type=Path,help=argparse.SUPPRESS)
     parser.add_argument('--data-dir', type=Path, default=DEFAULT_DATA)
     parser.add_argument('--daily', action='store_true', help='Create today\'s automatic snapshot if after 22:00')
     args = parser.parse_args()
@@ -256,7 +285,17 @@ def main():
         print(json.dumps({'created':bool(result), 'snapshot':result['id'] if result else None,
                           'date':current_time().date().isoformat()}, ensure_ascii=False))
         return
-    server = make_server(args.data_dir, args.port)
+    try:
+        server=make_server(args.data_dir,8875 if args.port is None else args.port)
+    except PortUnavailable as error:
+        if args.port is not None:
+            print(f'无法绑定本机端口 {args.port}：{error}',flush=True)
+            raise SystemExit(98)
+        server=make_server(args.data_dir,0)
+    if args.ready_file:
+        tmp=args.ready_file.with_suffix('.tmp')
+        tmp.write_text(json.dumps({'port':server.server_port,'pid':os.getpid()}),encoding='ascii')
+        tmp.replace(args.ready_file)
     def scheduler():
         while True:
             try:

@@ -1,0 +1,49 @@
+"""Check a temporary notebook only, via the packaged user's normal CMD entry."""
+import hashlib
+import io
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+from urllib.request import ProxyHandler, build_opener, Request
+from zipfile import ZipFile
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'app'))
+from platform_config import TZ
+from datetime import datetime
+
+
+def main():
+    if sys.platform!='win32':
+        raise SystemExit('请在 Windows 上运行这项自检。')
+    assert datetime(2026,7,1,tzinfo=TZ).utcoffset().total_seconds()==8*3600
+    http=build_opener(ProxyHandler({}))
+    actual=0
+    with tempfile.TemporaryDirectory(prefix='Lab Note check ') as tmp:
+        data=Path(tmp)/'临时空白记录'
+        command=['cmd.exe','/d','/c','Start-Lab-Note.cmd','--data-dir',str(data)]
+        def run(*args):
+            subprocess.run(command+list(args),cwd=ROOT,check=True,timeout=30,stdin=subprocess.DEVNULL)
+        try:
+            run('--no-open')
+            info=json.loads((data/'server.json').read_text(encoding='ascii'))
+            actual=info['port']
+            run('--no-open')
+            assert info==json.loads((data/'server.json').read_text(encoding='ascii'))
+            base=f'http://127.0.0.1:{actual}'
+            with http.open(base+'/api/state',timeout=8) as res:
+                boot=json.load(res)
+            assert Path(boot['data_dir'])==data.resolve() and not boot['state']['containers'] and not boot['state'].get('lab_records',[])
+            req=Request(base+'/api/backup',data=b'{}',headers={'Content-Type':'application/json','X-Lab-Token':boot['token']})
+            with http.open(req,timeout=10) as res:backup=json.load(res)
+            with http.open(base+backup['url'],timeout=10) as res, ZipFile(io.BytesIO(res.read())) as z:
+                assert hashlib.sha256(z.read('culture.sqlite3')).hexdigest()==z.read('original-file.sha256').decode().split()[0]
+        finally:
+            if (data/'server.json').exists():run('--stop')
+    print(f'自检通过：北京时间、临时库启动、端口 {actual}、重复启动、空白记录、备份校验和停止服务。')
+
+
+if __name__=='__main__':
+    main()

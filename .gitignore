@@ -83,3 +83,16 @@
 !/docs/downloads/lab-note-v1.0.zip.sig
 !/docs/downloads/allowed_signers
 !/docs/downloads/SHA256SUMS.txt
+
+# Local preview sources; portable binaries are built outside the repository.
+!/app/platform_config.py
+!/app/tzdata/
+!/app/tzdata/Shanghai.tzif
+!/Start-Lab-Note.cmd
+!/Stop-Lab-Note.cmd
+!/Check-Lab-Note.cmd
+!/tests/check_local_windows.py
+!/tests/test_cross_platform.py
+!/packaging/
+!/packaging/build_windows_local.py
+!/packaging/windows-readme.txt

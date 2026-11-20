@@ -3,13 +3,12 @@ from copy import deepcopy
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from zoneinfo import ZoneInfo
+from platform_config import TZ
 import json
 import re
 import uuid
 
 
-TZ = ZoneInfo('Asia/Shanghai')
 NUMBER = re.compile(r'[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?\Z')
 ACTUAL_TIME_FIELDS = {'prepared_at', 'aliquoted_at', 'extracted_at', 'acquired_at', 'seeded_date'}
 ACTUAL_STATUSES = {'active', 'running', 'completed', 'available', 'depleted', 'disposed'}

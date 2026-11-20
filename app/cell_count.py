@@ -2,10 +2,9 @@
 from datetime import datetime
 from decimal import Decimal, DecimalException
 import re
-from zoneinfo import ZoneInfo
+from platform_config import TZ
 from medium import number, text
 
-TZ=ZoneInfo('Asia/Shanghai')
 KEYS={'mode','coefficient','exponent','unit','volume_value','volume_unit','measured_at'}
 
 
