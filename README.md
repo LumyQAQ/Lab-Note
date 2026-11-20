@@ -7,12 +7,33 @@
 <!-- repository-only:start -->
 ![首次启动的空白工作台](docs/assets/workbench.png)
 
-[分享页源文件](docs/index.html) · [下载可运行的本地版 ZIP](docs/downloads/lab-note-v1.0.zip) · [发布 GitHub Pages](PUBLISHING.md)
+[在线分享页](https://lumyqaq.github.io/Lab-Note/) · [下载与签名校验](https://lumyqaq.github.io/Lab-Note/verification.html)
+
+| 系统 | 下载 | 启动 |
+| --- | --- | --- |
+| Windows 10 / 11 x64 | [1.1.0-preview.1 预览版 ZIP](https://github.com/LumyQAQ/Lab-Note/releases/download/v1.1.0-preview.1/Lab-Note-1.1.0-preview.1-Windows-x64.zip) | 全部解压后双击 `Start-Lab-Note.cmd`，已附 Python |
+| macOS | [1.0.0 正式版 ZIP](docs/downloads/lab-note-v1.0.zip) | 安装 Python 3.9+，双击「启动实验日记.command」 |
+
+## Windows 本机预览版
+
+已在 Windows Server 2022 上用发布的 ZIP 验证启动、8875 占用时自动换端口、重复启动、空白数据库、备份和停止。[查看自检记录](https://github.com/LumyQAQ/Lab-Note/actions/runs/44755351630)
+
+在解压目录的 PowerShell 中运行：
+
+```powershell
+.\Start-Lab-Note.cmd -h
+.\Start-Lab-Note.cmd --status
+.\Start-Lab-Note.cmd --port 8890
+```
+
+默认优先使用 8875，端口冲突时自动改用空闲端口。要切换运行中服务的端口，先执行 `Stop-Lab-Note.cmd`。记录和日志位于 `%LOCALAPPDATA%\Lab Note`。可双击 `Check-Lab-Note.cmd` 用临时库自检。
+
+主分支保留 macOS 正式版源码；Windows 预览版源码和发行附件见 [v1.1.0-preview.1](https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.1.0-preview.1)。
 <!-- repository-only:end -->
 
 [软件署名及发布校验](AUTHORS.md)
 
-## 本机运行
+## macOS 本机运行
 
 主机需要 macOS 和 Python 3.9 或更新版本。程序使用 Python 标准库和 SQLite。
 
