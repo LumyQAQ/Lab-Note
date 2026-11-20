@@ -1,0 +1,34 @@
+name: Verify Windows preview download
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  signed-package-smoke:
+    runs-on: windows-2022
+    timeout-minutes: 7
+    steps:
+      - name: Verify the published x64 ZIP and exercise its real CMD entry points
+        shell: pwsh
+        env:
+          ASSET: Lab-Note-1.1.0-preview.1-Windows-x64.zip
+          VERSION: v1.1.0-preview.1
+          EXPECTED_SHA256: a7802bf07fba21e22c2cf0cae83da909f1474a48c7962572a8f53aa93d1b7a6e
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assetUrl = "https://github.com/LumyQAQ/Lab-Note/releases/download/$env:VERSION/$env:ASSET"
+          $zip = Join-Path $env:RUNNER_TEMP $env:ASSET
+          Invoke-WebRequest -Uri $assetUrl -OutFile $zip
+          if ((Get-FileHash -Algorithm SHA256 $zip).Hash -ne $env:EXPECTED_SHA256) { throw 'Release checksum mismatch' }
+          $dir = Join-Path $env:RUNNER_TEMP 'Lab Note 测试'
+          Expand-Archive -LiteralPath $zip -DestinationPath $dir
+          Set-Location (Join-Path $dir 'Lab-Note')
+          & .\Start-Lab-Note.cmd -h
+          if ($LASTEXITCODE -ne 0) { throw 'Windows CLI help failed' }
+          $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 8875)
+          try {
+            $listener.Start()
+            & .\Check-Lab-Note.cmd ci
+            if ($LASTEXITCODE -ne 0) { throw 'Windows self-check failed' }
+          } finally {
+            $listener.Stop()
+          }

@@ -83,3 +83,6 @@
 !/docs/downloads/lab-note-v1.0.zip.sig
 !/docs/downloads/allowed_signers
 !/docs/downloads/SHA256SUMS.txt
+!/.github/
+!/.github/workflows/
+!/.github/workflows/check-windows-preview.yml
