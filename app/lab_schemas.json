@@ -1,0 +1,2260 @@
+{
+  "version": 1,
+  "modules": {
+    "drug": {
+      "label": "药物配制 / 存储",
+      "prefix": "DRUG",
+      "statuses": [
+        [
+          "draft",
+          "草稿"
+        ],
+        [
+          "available",
+          "在用 / 可用"
+        ],
+        [
+          "depleted",
+          "已用完"
+        ],
+        [
+          "disposed",
+          "已废弃"
+        ]
+      ],
+      "variants": {
+        "stock": {
+          "label": "配制与存储",
+          "fields": [
+            {
+              "key": "drug_name",
+              "label": "药物名称",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "supplier",
+              "label": "厂家",
+              "type": "text"
+            },
+            {
+              "key": "catalog",
+              "label": "货号",
+              "type": "text"
+            },
+            {
+              "key": "lot",
+              "label": "原料批号",
+              "type": "text"
+            },
+            {
+              "key": "prepared_at",
+              "label": "配制日期",
+              "type": "date"
+            },
+            {
+              "key": "operator",
+              "label": "配制人",
+              "type": "text"
+            },
+            {
+              "key": "solvent",
+              "label": "溶剂",
+              "type": "text"
+            },
+            {
+              "key": "molecular_weight",
+              "label": "分子量（g/mol，可选）",
+              "type": "number",
+              "min": 0
+            },
+            {
+              "key": "weighed_amount",
+              "label": "称取量",
+              "type": "number",
+              "min": 0,
+              "unit_key": "weighed_unit"
+            },
+            {
+              "key": "weighed_unit",
+              "label": "称取量单位",
+              "type": "text"
+            },
+            {
+              "key": "solvent_volume",
+              "label": "加入溶剂体积",
+              "type": "number",
+              "min": 0,
+              "unit_key": "solvent_volume_unit"
+            },
+            {
+              "key": "solvent_volume_unit",
+              "label": "溶剂体积单位",
+              "type": "text"
+            },
+            {
+              "key": "final_volume",
+              "label": "最终体积",
+              "type": "number",
+              "min": 0,
+              "unit_key": "final_volume_unit"
+            },
+            {
+              "key": "final_volume_unit",
+              "label": "最终体积单位",
+              "type": "text"
+            },
+            {
+              "key": "stock_concentration",
+              "label": "配制后浓度 / 母液浓度",
+              "type": "number",
+              "min": 0,
+              "unit_key": "stock_unit"
+            },
+            {
+              "key": "stock_unit",
+              "label": "浓度单位",
+              "type": "text"
+            },
+            {
+              "key": "storage_temperature",
+              "label": "保存温度 / 条件",
+              "type": "text"
+            },
+            {
+              "key": "location",
+              "label": "冰箱 / 层 / 盒 / 位置",
+              "type": "text"
+            },
+            {
+              "key": "expiry",
+              "label": "有效期 / 复核日期",
+              "type": "date"
+            },
+            {
+              "key": "light_protection",
+              "label": "避光要求",
+              "type": "text"
+            },
+            {
+              "key": "preparation_notes",
+              "label": "配制过程与依据",
+              "type": "textarea"
+            }
+          ],
+          "tables": [
+            {
+              "key": "aliquots",
+              "label": "分装与库存",
+              "columns": [
+                {
+                  "key": "label",
+                  "label": "分装编号",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "volume",
+                  "label": "初始量",
+                  "type": "number",
+                  "min": 0,
+                  "unit_key": "unit"
+                },
+                {
+                  "key": "unit",
+                  "label": "数量单位",
+                  "type": "text"
+                },
+                {
+                  "key": "remaining",
+                  "label": "当前剩余量",
+                  "type": "number",
+                  "min": 0
+                },
+                {
+                  "key": "location",
+                  "label": "存放位置",
+                  "type": "text"
+                },
+                {
+                  "key": "freeze_thaws",
+                  "label": "冻融次数",
+                  "type": "number",
+                  "min": 0,
+                  "integer": true
+                },
+                {
+                  "key": "status",
+                  "label": "状态",
+                  "type": "select",
+                  "options": [
+                    "在用",
+                    "未启用",
+                    "已用完",
+                    "已废弃"
+                  ]
+                },
+                {
+                  "key": "notes",
+                  "label": "备注",
+                  "type": "text"
+                }
+              ]
+            },
+            {
+              "key": "usage",
+              "label": "领用 / 使用记录",
+              "columns": [
+                {
+                  "key": "at",
+                  "label": "使用时间",
+                  "type": "datetime"
+                },
+                {
+                  "key": "aliquot",
+                  "label": "分装编号",
+                  "type": "text"
+                },
+                {
+                  "key": "amount",
+                  "label": "用量",
+                  "type": "number",
+                  "min": 0,
+                  "unit_key": "unit"
+                },
+                {
+                  "key": "unit",
+                  "label": "单位",
+                  "type": "text"
+                },
+                {
+                  "key": "purpose",
+                  "label": "用途 / 实验编号",
+                  "type": "text"
+                },
+                {
+                  "key": "operator",
+                  "label": "使用人",
+                  "type": "text"
+                },
+                {
+                  "key": "notes",
+                  "label": "备注",
+                  "type": "text"
+                }
+              ]
+            }
+          ]
+        },
+        "aliquot": {
+          "label": "分装记录",
+          "fields": [
+            {
+              "key": "drug_name",
+              "label": "试剂 / 药物名称",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "supplier",
+              "label": "厂家",
+              "type": "text"
+            },
+            {
+              "key": "catalog",
+              "label": "货号",
+              "type": "text"
+            },
+            {
+              "key": "lot",
+              "label": "批号",
+              "type": "text"
+            },
+            {
+              "key": "operator",
+              "label": "操作人",
+              "type": "text"
+            },
+            {
+              "key": "aliquoted_at",
+              "label": "分装日期",
+              "type": "date"
+            },
+            {
+              "key": "container",
+              "label": "分装容器及规格",
+              "type": "text"
+            },
+            {
+              "key": "aliquot_volume",
+              "label": "每管 / 份分装量",
+              "type": "number",
+              "min": 0,
+              "unit_key": "aliquot_unit"
+            },
+            {
+              "key": "aliquot_unit",
+              "label": "分装量单位",
+              "type": "text"
+            },
+            {
+              "key": "volume_basis",
+              "label": "分装量依据",
+              "type": "select",
+              "options": [
+                "约量",
+                "实测"
+              ]
+            },
+            {
+              "key": "aliquot_count",
+              "label": "分装份数（未记录可留空）",
+              "type": "number",
+              "min": 1,
+              "integer": true
+            },
+            {
+              "key": "cooling_conditions",
+              "label": "分装后处理 / 冷却条件",
+              "type": "textarea"
+            },
+            {
+              "key": "storage_temperature",
+              "label": "保存温度 / 条件",
+              "type": "text"
+            },
+            {
+              "key": "location",
+              "label": "冰箱 / 层 / 盒 / 位置",
+              "type": "text"
+            },
+            {
+              "key": "expiry",
+              "label": "有效期 / 复核日期",
+              "type": "date"
+            }
+          ],
+          "tables": [
+            {
+              "key": "preprocessing",
+              "label": "分装前处理",
+              "columns": [
+                {
+                  "key": "operation",
+                  "label": "处理名称",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "temperature",
+                  "label": "温度 / 条件",
+                  "type": "text"
+                },
+                {
+                  "key": "duration",
+                  "label": "处理时长",
+                  "type": "number",
+                  "min": 0,
+                  "unit_key": "duration_unit"
+                },
+                {
+                  "key": "duration_unit",
+                  "label": "时长单位",
+                  "type": "text"
+                },
+                {
+                  "key": "notes",
+                  "label": "说明",
+                  "type": "text"
+                }
+              ]
+            },
+            {
+              "key": "aliquots",
+              "label": "分装与库存",
+              "columns": [
+                {
+                  "key": "label",
+                  "label": "分装编号",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "volume",
+                  "label": "初始量",
+                  "type": "number",
+                  "min": 0,
+                  "unit_key": "unit"
+                },
+                {
+                  "key": "unit",
+                  "label": "数量单位",
+                  "type": "text"
+                },
+                {
+                  "key": "remaining",
+                  "label": "当前剩余量",
+                  "type": "number",
+                  "min": 0
+                },
+                {
+                  "key": "location",
+                  "label": "存放位置",
+                  "type": "text"
+                },
+                {
+                  "key": "freeze_thaws",
+                  "label": "冻融次数",
+                  "type": "number",
+                  "min": 0,
+                  "integer": true
+                },
+                {
+                  "key": "status",
+                  "label": "状态",
+                  "type": "select",
+                  "options": [
+                    "在用",
+                    "未启用",
+                    "已用完",
+                    "已废弃"
+                  ]
+                },
+                {
+                  "key": "notes",
+                  "label": "备注",
+                  "type": "text"
+                }
+              ]
+            },
+            {
+              "key": "usage",
+              "label": "领用 / 使用记录",
+              "columns": [
+                {
+                  "key": "at",
+                  "label": "使用时间",
+                  "type": "datetime"
+                },
+                {
+                  "key": "aliquot",
+                  "label": "分装编号",
+                  "type": "text"
+                },
+                {
+                  "key": "amount",
+                  "label": "用量",
+                  "type": "number",
+                  "min": 0,
+                  "unit_key": "unit"
+                },
+                {
+                  "key": "unit",
+                  "label": "单位",
+                  "type": "text"
+                },
+                {
+                  "key": "purpose",
+                  "label": "用途 / 实验编号",
+                  "type": "text"
+                },
+                {
+                  "key": "operator",
+                  "label": "使用人",
+                  "type": "text"
+                },
+                {
+                  "key": "notes",
+                  "label": "备注",
+                  "type": "text"
+                }
+              ]
+            }
+          ],
+          "sections": [
+            {
+              "label": "试剂与批次",
+              "fields": [
+                "drug_name",
+                "supplier",
+                "catalog",
+                "lot",
+                "operator"
+              ]
+            },
+            {
+              "tables": [
+                "preprocessing"
+              ]
+            },
+            {
+              "label": "分装规格",
+              "fields": [
+                "aliquoted_at",
+                "container",
+                "aliquot_volume",
+                "aliquot_unit",
+                "volume_basis",
+                "aliquot_count"
+              ]
+            },
+            {
+              "label": "分装后处理与存储",
+              "fields": [
+                "cooling_conditions",
+                "storage_temperature",
+                "location",
+                "expiry"
+              ]
+            },
+            {
+              "label": "逐管库存与领用（可选）",
+              "tables": [
+                "aliquots",
+                "usage"
+              ],
+              "collapsed": true
+            }
+          ]
+        }
+      }
+    },
+    "flow": {
+      "label": "流式实验",
+      "prefix": "FLOW",
+      "statuses": [
+        [
+          "draft",
+          "草稿"
+        ],
+        [
+          "planned",
+          "计划"
+        ],
+        [
+          "running",
+          "进行中"
+        ],
+        [
+          "completed",
+          "已完成"
+        ],
+        [
+          "cancelled",
+          "已取消"
+        ]
+      ],
+      "variants": {
+        "assay": {
+          "label": "流式实验",
+          "fields": [
+            {
+              "key": "objective",
+              "label": "实验目的",
+              "type": "textarea"
+            },
+            {
+              "key": "instrument",
+              "label": "仪器 / 编号",
+              "type": "text"
+            },
+            {
+              "key": "operator",
+              "label": "操作者",
+              "type": "text"
+            },
+            {
+              "key": "acquired_at",
+              "label": "上机时间",
+              "type": "datetime"
+            },
+            {
+              "key": "software",
+              "label": "采集 / 分析软件版本",
+              "type": "text"
+            },
+            {
+              "key": "staining_protocol",
+              "label": "染色方案 / SOP编号",
+              "type": "text"
+            },
+            {
+              "key": "compensation",
+              "label": "补偿 / 光谱拆分说明",
+              "type": "textarea"
+            },
+            {
+              "key": "gating",
+              "label": "门控策略",
+              "type": "textarea"
+            },
+            {
+              "key": "result_notes",
+              "label": "结果 / 异常与说明",
+              "type": "textarea"
+            }
+          ],
+          "tables": [
+            {
+              "key": "samples",
+              "label": "样本与上机对应",
+              "columns": [
+                {
+                  "key": "sample",
+                  "label": "样本编号",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "source",
+                  "label": "细胞来源",
+                  "type": "source"
+                },
+                {
+                  "key": "group",
+                  "label": "实验组 / 对照",
+                  "type": "text"
+                },
+                {
+                  "key": "tube",
+                  "label": "管号 / 板孔",
+                  "type": "text"
+                },
+                {
+                  "key": "control",
+                  "label": "对照类型",
+                  "type": "select",
+                  "options": [
+                    "实验样本",
+                    "未染",
+                    "单染",
+                    "FMO",
+                    "同型对照",
+                    "其他"
+                  ]
+                },
+                {
+                  "key": "events",
+                  "label": "采集事件数",
+                  "type": "number",
+                  "min": 0,
+                  "integer": true
+                },
+                {
+                  "key": "file",
+                  "label": "FCS文件名",
+                  "type": "text"
+                },
+                {
+                  "key": "notes",
+                  "label": "备注",
+                  "type": "text"
+                }
+              ]
+            },
+            {
+              "key": "panel",
+              "label": "抗体 / 染料面板",
+              "columns": [
+                {
+                  "key": "target",
+                  "label": "靶标 / 染料",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "fluor",
+                  "label": "荧光素 / 通道",
+                  "type": "text"
+                },
+                {
+                  "key": "clone",
+                  "label": "克隆号",
+                  "type": "text"
+                },
+                {
+                  "key": "supplier",
+                  "label": "厂家",
+                  "type": "text"
+                },
+                {
+                  "key": "catalog",
+                  "label": "货号",
+                  "type": "text"
+                },
+                {
+                  "key": "lot",
+                  "label": "批号",
+                  "type": "text"
+                },
+                {
+                  "key": "dilution",
+                  "label": "稀释倍数 / 使用量",
+                  "type": "text"
+                },
+                {
+                  "key": "notes",
+                  "label": "备注",
+                  "type": "text"
+                }
+              ]
+            },
+            {
+              "key": "results",
+              "label": "分析结果",
+              "columns": [
+                {
+                  "key": "sample",
+                  "label": "样本编号",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "population",
+                  "label": "群体 / 门",
+                  "type": "text"
+                },
+                {
+                  "key": "metric",
+                  "label": "指标名称",
+                  "type": "text"
+                },
+                {
+                  "key": "value",
+                  "label": "结果值",
+                  "type": "number"
+                },
+                {
+                  "key": "unit",
+                  "label": "单位 / %",
+                  "type": "text"
+                },
+                {
+                  "key": "analysis_file",
+                  "label": "分析文件",
+                  "type": "text"
+                },
+                {
+                  "key": "notes",
+                  "label": "备注",
+                  "type": "text"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "western": {
+      "label": "Western Blot",
+      "prefix": "WB",
+      "statuses": [
+        [
+          "draft",
+          "草稿"
+        ],
+        [
+          "planned",
+          "计划"
+        ],
+        [
+          "running",
+          "进行中"
+        ],
+        [
+          "completed",
+          "已完成"
+        ],
+        [
+          "cancelled",
+          "已取消"
+        ]
+      ],
+      "variants": {
+        "protein": {
+          "label": "蛋白提取",
+          "fields": [
+            {
+              "key": "operator",
+              "label": "操作者",
+              "type": "text"
+            },
+            {
+              "key": "extracted_at",
+              "label": "提取时间",
+              "type": "datetime"
+            },
+            {
+              "key": "buffer",
+              "label": "裂解液 / 批号",
+              "type": "text"
+            },
+            {
+              "key": "inhibitors",
+              "label": "抑制剂及配方",
+              "type": "text"
+            },
+            {
+              "key": "protocol",
+              "label": "提取方案 / SOP编号",
+              "type": "text"
+            },
+            {
+              "key": "storage",
+              "label": "保存条件",
+              "type": "text"
+            },
+            {
+              "key": "result_notes",
+              "label": "结果 / 异常与说明",
+              "type": "textarea"
+            }
+          ],
+          "tables": [
+            {
+              "key": "samples",
+              "label": "蛋白样本",
+              "columns": [
+                {
+                  "key": "sample",
+                  "label": "样本编号",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "source",
+                  "label": "细胞来源",
+                  "type": "source"
+                },
+                {
+                  "key": "group",
+                  "label": "分组",
+                  "type": "text"
+                },
+                {
+                  "key": "volume",
+                  "label": "提取液体积",
+                  "type": "number",
+                  "min": 0,
+                  "unit_key": "volume_unit"
+                },
+                {
+                  "key": "volume_unit",
+                  "label": "体积单位",
+                  "type": "text"
+                },
+                {
+                  "key": "location",
+                  "label": "冻存位置",
+                  "type": "text"
+                },
+                {
+                  "key": "notes",
+                  "label": "备注",
+                  "type": "text"
+                }
+              ]
+            }
+          ]
+        },
+        "bca": {
+          "label": "BCA蛋白浓度",
+          "fields": [
+            {
+              "key": "kit",
+              "label": "试剂盒 / 厂家 / 货号",
+              "type": "text"
+            },
+            {
+              "key": "lot",
+              "label": "试剂批号",
+              "type": "text"
+            },
+            {
+              "key": "reader",
+              "label": "酶标仪",
+              "type": "text"
+            },
+            {
+              "key": "wavelength",
+              "label": "读取波长",
+              "type": "text"
+            },
+            {
+              "key": "blank_method",
+              "label": "空白扣除方式",
+              "type": "text"
+            },
+            {
+              "key": "curve_method",
+              "label": "标准曲线方法 / 方程",
+              "type": "textarea"
+            },
+            {
+              "key": "result_notes",
+              "label": "结果 / 异常与说明",
+              "type": "textarea"
+            }
+          ],
+          "tables": [
+            {
+              "key": "standards",
+              "label": "标准品读数",
+              "columns": [
+                {
+                  "key": "label",
+                  "label": "标准品编号",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "concentration",
+                  "label": "标准浓度",
+                  "type": "number",
+                  "min": 0,
+                  "unit_key": "unit"
+                },
+                {
+                  "key": "unit",
+                  "label": "单位",
+                  "type": "text"
+                },
+                {
+                  "key": "well",
+                  "label": "孔位",
+                  "type": "text"
+                },
+                {
+                  "key": "replicate",
+                  "label": "重复编号",
+                  "type": "text"
+                },
+                {
+                  "key": "od",
+                  "label": "原始OD",
+                  "type": "number"
+                },
+                {
+                  "key": "blank",
+                  "label": "空白OD",
+                  "type": "number"
+                }
+              ]
+            },
+            {
+              "key": "samples",
+              "label": "样本浓度",
+              "columns": [
+                {
+                  "key": "sample",
+                  "label": "样本编号",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "source",
+                  "label": "细胞来源",
+                  "type": "source"
+                },
+                {
+                  "key": "well",
+                  "label": "孔位",
+                  "type": "text"
+                },
+                {
+                  "key": "replicate",
+                  "label": "重复编号",
+                  "type": "text"
+                },
+                {
+                  "key": "od",
+                  "label": "原始OD",
+                  "type": "number"
+                },
+                {
+                  "key": "dilution",
+                  "label": "稀释倍数",
+                  "type": "number",
+                  "min": 0
+                },
+                {
+                  "key": "protein_concentration",
+                  "label": "确认的蛋白浓度",
+                  "type": "number",
+                  "min": 0,
+                  "unit_key": "unit"
+                },
+                {
+                  "key": "unit",
+                  "label": "浓度单位",
+                  "type": "text"
+                },
+                {
+                  "key": "notes",
+                  "label": "计算 / 备注",
+                  "type": "text"
+                }
+              ]
+            }
+          ]
+        },
+        "blot": {
+          "label": "Western Blot",
+          "fields": [
+            {
+              "key": "operator",
+              "label": "操作者",
+              "type": "text"
+            },
+            {
+              "key": "gel",
+              "label": "胶类型 / 浓度",
+              "type": "text"
+            },
+            {
+              "key": "membrane",
+              "label": "膜类型 / 批号",
+              "type": "text"
+            },
+            {
+              "key": "transfer",
+              "label": "转膜条件",
+              "type": "textarea"
+            },
+            {
+              "key": "blocking",
+              "label": "封闭条件",
+              "type": "text"
+            },
+            {
+              "key": "detection",
+              "label": "显影方式 / 仪器",
+              "type": "text"
+            },
+            {
+              "key": "exposure",
+              "label": "曝光信息",
+              "type": "text"
+            },
+            {
+              "key": "normalization",
+              "label": "归一化方法 / 内参",
+              "type": "text"
+            },
+            {
+              "key": "result_notes",
+              "label": "结果 / 异常与说明",
+              "type": "textarea"
+            }
+          ],
+          "tables": [
+            {
+              "key": "lanes",
+              "label": "泳道与上样",
+              "columns": [
+                {
+                  "key": "sample",
+                  "label": "样本编号",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "source",
+                  "label": "细胞来源",
+                  "type": "source"
+                },
+                {
+                  "key": "lane",
+                  "label": "泳道",
+                  "type": "text"
+                },
+                {
+                  "key": "group",
+                  "label": "分组",
+                  "type": "text"
+                },
+                {
+                  "key": "loading_amount",
+                  "label": "上样蛋白量",
+                  "type": "number",
+                  "min": 0,
+                  "unit_key": "unit"
+                },
+                {
+                  "key": "unit",
+                  "label": "单位",
+                  "type": "text"
+                },
+                {
+                  "key": "sample_ref",
+                  "label": "提取 / BCA样本编号",
+                  "type": "text"
+                },
+                {
+                  "key": "notes",
+                  "label": "备注",
+                  "type": "text"
+                }
+              ]
+            },
+            {
+              "key": "antibodies",
+              "label": "抗体记录",
+              "columns": [
+                {
+                  "key": "target",
+                  "label": "靶标",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "role",
+                  "label": "类型",
+                  "type": "select",
+                  "options": [
+                    "一抗",
+                    "二抗",
+                    "内参",
+                    "其他"
+                  ]
+                },
+                {
+                  "key": "supplier",
+                  "label": "厂家",
+                  "type": "text"
+                },
+                {
+                  "key": "catalog",
+                  "label": "货号",
+                  "type": "text"
+                },
+                {
+                  "key": "lot",
+                  "label": "批号",
+                  "type": "text"
+                },
+                {
+                  "key": "dilution",
+                  "label": "稀释比例",
+                  "type": "text"
+                },
+                {
+                  "key": "incubation",
+                  "label": "孵育条件",
+                  "type": "text"
+                }
+              ]
+            },
+            {
+              "key": "results",
+              "label": "条带与定量",
+              "columns": [
+                {
+                  "key": "sample",
+                  "label": "样本编号",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "target",
+                  "label": "靶标",
+                  "type": "text"
+                },
+                {
+                  "key": "band",
+                  "label": "条带 / 分子量",
+                  "type": "text"
+                },
+                {
+                  "key": "signal",
+                  "label": "条带信号",
+                  "type": "number"
+                },
+                {
+                  "key": "reference_signal",
+                  "label": "内参信号",
+                  "type": "number"
+                },
+                {
+                  "key": "normalized",
+                  "label": "确认的归一化结果",
+                  "type": "number"
+                },
+                {
+                  "key": "image",
+                  "label": "图像文件",
+                  "type": "text"
+                },
+                {
+                  "key": "notes",
+                  "label": "备注",
+                  "type": "text"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "pcr": {
+      "label": "PCR / qPCR",
+      "prefix": "PCR",
+      "statuses": [
+        [
+          "draft",
+          "草稿"
+        ],
+        [
+          "planned",
+          "计划"
+        ],
+        [
+          "running",
+          "进行中"
+        ],
+        [
+          "completed",
+          "已完成"
+        ],
+        [
+          "cancelled",
+          "已取消"
+        ]
+      ],
+      "variants": {
+        "extraction": {
+          "label": "DNA / RNA提取",
+          "fields": [
+            {
+              "key": "material",
+              "label": "提取类型",
+              "type": "select",
+              "options": [
+                "DNA",
+                "RNA",
+                "DNA+RNA"
+              ]
+            },
+            {
+              "key": "operator",
+              "label": "操作者",
+              "type": "text"
+            },
+            {
+              "key": "extracted_at",
+              "label": "提取时间",
+              "type": "datetime"
+            },
+            {
+              "key": "kit",
+              "label": "提取试剂 / 货号",
+              "type": "text"
+            },
+            {
+              "key": "lot",
+              "label": "批号",
+              "type": "text"
+            },
+            {
+              "key": "dnase",
+              "label": "DNase / 去基因组说明",
+              "type": "text"
+            },
+            {
+              "key": "storage",
+              "label": "保存条件",
+              "type": "text"
+            },
+            {
+              "key": "result_notes",
+              "label": "结果 / 异常与说明",
+              "type": "textarea"
+            }
+          ],
+          "tables": [
+            {
+              "key": "samples",
+              "label": "核酸样本",
+              "columns": [
+                {
+                  "key": "sample",
+                  "label": "样本编号",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "source",
+                  "label": "细胞来源",
+                  "type": "source"
+                },
+                {
+                  "key": "volume",
+                  "label": "洗脱体积",
+                  "type": "number",
+                  "min": 0,
+                  "unit_key": "volume_unit"
+                },
+                {
+                  "key": "volume_unit",
+                  "label": "体积单位",
+                  "type": "text"
+                },
+                {
+                  "key": "concentration",
+                  "label": "核酸浓度",
+                  "type": "number",
+                  "min": 0,
+                  "unit_key": "unit"
+                },
+                {
+                  "key": "unit",
+                  "label": "浓度单位",
+                  "type": "text"
+                },
+                {
+                  "key": "ratio260280",
+                  "label": "A260/A280",
+                  "type": "number"
+                },
+                {
+                  "key": "ratio260230",
+                  "label": "A260/A230",
+                  "type": "number"
+                },
+                {
+                  "key": "integrity",
+                  "label": "完整性 / RIN",
+                  "type": "text"
+                },
+                {
+                  "key": "location",
+                  "label": "储存位置",
+                  "type": "text"
+                },
+                {
+                  "key": "notes",
+                  "label": "备注",
+                  "type": "text"
+                }
+              ]
+            }
+          ]
+        },
+        "pcr": {
+          "label": "PCR",
+          "fields": [
+            {
+              "key": "polymerase",
+              "label": "聚合酶 / Mix / 批号",
+              "type": "text"
+            },
+            {
+              "key": "reaction_volume",
+              "label": "反应体积及单位",
+              "type": "text"
+            },
+            {
+              "key": "program",
+              "label": "扩增程序 / SOP编号",
+              "type": "textarea"
+            },
+            {
+              "key": "instrument",
+              "label": "仪器",
+              "type": "text"
+            },
+            {
+              "key": "detection",
+              "label": "产物检测方式",
+              "type": "text"
+            },
+            {
+              "key": "result_notes",
+              "label": "结果 / 异常与说明",
+              "type": "textarea"
+            }
+          ],
+          "tables": [
+            {
+              "key": "primers",
+              "label": "引物",
+              "columns": [
+                {
+                  "key": "target",
+                  "label": "基因 / 靶标",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "forward",
+                  "label": "正向引物序列",
+                  "type": "text"
+                },
+                {
+                  "key": "reverse",
+                  "label": "反向引物序列",
+                  "type": "text"
+                },
+                {
+                  "key": "amplicon",
+                  "label": "预期产物长度",
+                  "type": "text"
+                },
+                {
+                  "key": "stock",
+                  "label": "引物母液 / 批号",
+                  "type": "text"
+                },
+                {
+                  "key": "working",
+                  "label": "工作浓度及单位",
+                  "type": "text"
+                }
+              ]
+            },
+            {
+              "key": "samples",
+              "label": "反应与结果",
+              "columns": [
+                {
+                  "key": "sample",
+                  "label": "样本编号",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "source",
+                  "label": "细胞来源",
+                  "type": "source"
+                },
+                {
+                  "key": "position",
+                  "label": "管 / 孔位",
+                  "type": "text"
+                },
+                {
+                  "key": "target",
+                  "label": "靶标",
+                  "type": "text"
+                },
+                {
+                  "key": "template",
+                  "label": "模板类型 / 量及单位",
+                  "type": "text"
+                },
+                {
+                  "key": "control",
+                  "label": "对照说明",
+                  "type": "text"
+                },
+                {
+                  "key": "band",
+                  "label": "条带 / 结果",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "label": "结果文件",
+                  "type": "text"
+                },
+                {
+                  "key": "notes",
+                  "label": "备注",
+                  "type": "text"
+                }
+              ]
+            }
+          ]
+        },
+        "qpcr": {
+          "label": "qPCR / RT-qPCR",
+          "fields": [
+            {
+              "key": "chemistry",
+              "label": "体系 / 试剂 / 批号",
+              "type": "text"
+            },
+            {
+              "key": "rt",
+              "label": "逆转录记录 / 方案",
+              "type": "text"
+            },
+            {
+              "key": "reaction_volume",
+              "label": "反应体积及单位",
+              "type": "text"
+            },
+            {
+              "key": "program",
+              "label": "程序 / SOP编号",
+              "type": "textarea"
+            },
+            {
+              "key": "instrument",
+              "label": "仪器",
+              "type": "text"
+            },
+            {
+              "key": "reference",
+              "label": "内参基因",
+              "type": "text"
+            },
+            {
+              "key": "calibrator",
+              "label": "校准组",
+              "type": "text"
+            },
+            {
+              "key": "normalization",
+              "label": "计算方法 / 效率说明",
+              "type": "textarea"
+            },
+            {
+              "key": "result_notes",
+              "label": "结果 / 异常与说明",
+              "type": "textarea"
+            }
+          ],
+          "tables": [
+            {
+              "key": "primers",
+              "label": "引物 / 探针",
+              "columns": [
+                {
+                  "key": "target",
+                  "label": "靶标",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "forward",
+                  "label": "正向引物",
+                  "type": "text"
+                },
+                {
+                  "key": "reverse",
+                  "label": "反向引物",
+                  "type": "text"
+                },
+                {
+                  "key": "probe",
+                  "label": "探针 / 通道",
+                  "type": "text"
+                },
+                {
+                  "key": "efficiency",
+                  "label": "确认的扩增效率",
+                  "type": "text"
+                },
+                {
+                  "key": "notes",
+                  "label": "备注",
+                  "type": "text"
+                }
+              ]
+            },
+            {
+              "key": "samples",
+              "label": "孔位与Ct/Cq",
+              "columns": [
+                {
+                  "key": "sample",
+                  "label": "样本编号",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "source",
+                  "label": "细胞来源",
+                  "type": "source"
+                },
+                {
+                  "key": "well",
+                  "label": "孔位",
+                  "type": "text"
+                },
+                {
+                  "key": "target",
+                  "label": "靶基因",
+                  "type": "text"
+                },
+                {
+                  "key": "group",
+                  "label": "组别",
+                  "type": "text"
+                },
+                {
+                  "key": "replicate",
+                  "label": "技术重复",
+                  "type": "text"
+                },
+                {
+                  "key": "ct",
+                  "label": "Ct / Cq（可填未检出）",
+                  "type": "text"
+                },
+                {
+                  "key": "control",
+                  "label": "NTC / No-RT / 对照",
+                  "type": "text"
+                },
+                {
+                  "key": "melt",
+                  "label": "熔解曲线 / 质量说明",
+                  "type": "text"
+                },
+                {
+                  "key": "normalized",
+                  "label": "确认的计算结果",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "label": "原始文件",
+                  "type": "text"
+                },
+                {
+                  "key": "notes",
+                  "label": "备注",
+                  "type": "text"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "elisa": {
+      "label": "ELISA",
+      "prefix": "ELISA",
+      "statuses": [
+        [
+          "draft",
+          "草稿"
+        ],
+        [
+          "planned",
+          "计划"
+        ],
+        [
+          "running",
+          "进行中"
+        ],
+        [
+          "completed",
+          "已完成"
+        ],
+        [
+          "cancelled",
+          "已取消"
+        ]
+      ],
+      "variants": {
+        "assay": {
+          "label": "ELISA实验",
+          "fields": [
+            {
+              "key": "analyte",
+              "label": "检测指标",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "species",
+              "label": "样本物种",
+              "type": "text"
+            },
+            {
+              "key": "kit",
+              "label": "试剂盒 / 厂家 / 货号",
+              "type": "text"
+            },
+            {
+              "key": "lot",
+              "label": "试剂批号",
+              "type": "text"
+            },
+            {
+              "key": "expiry",
+              "label": "试剂有效期",
+              "type": "date"
+            },
+            {
+              "key": "sample_type",
+              "label": "样本类型",
+              "type": "text"
+            },
+            {
+              "key": "reader",
+              "label": "酶标仪",
+              "type": "text"
+            },
+            {
+              "key": "wavelength",
+              "label": "检测 / 参考波长",
+              "type": "text"
+            },
+            {
+              "key": "protocol",
+              "label": "实验方案 / SOP编号",
+              "type": "text"
+            },
+            {
+              "key": "curve_method",
+              "label": "标准曲线方法 / 方程",
+              "type": "textarea"
+            },
+            {
+              "key": "result_notes",
+              "label": "结果 / 异常与说明",
+              "type": "textarea"
+            }
+          ],
+          "tables": [
+            {
+              "key": "standards",
+              "label": "标准曲线读数",
+              "columns": [
+                {
+                  "key": "label",
+                  "label": "标准品编号",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "concentration",
+                  "label": "标准浓度",
+                  "type": "number",
+                  "min": 0,
+                  "unit_key": "unit"
+                },
+                {
+                  "key": "unit",
+                  "label": "单位",
+                  "type": "text"
+                },
+                {
+                  "key": "well",
+                  "label": "孔位",
+                  "type": "text"
+                },
+                {
+                  "key": "replicate",
+                  "label": "重复编号",
+                  "type": "text"
+                },
+                {
+                  "key": "od",
+                  "label": "原始OD",
+                  "type": "number"
+                }
+              ]
+            },
+            {
+              "key": "samples",
+              "label": "样本孔位与结果",
+              "columns": [
+                {
+                  "key": "sample",
+                  "label": "样本编号",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "source",
+                  "label": "细胞来源",
+                  "type": "source"
+                },
+                {
+                  "key": "well",
+                  "label": "孔位",
+                  "type": "text"
+                },
+                {
+                  "key": "group",
+                  "label": "分组",
+                  "type": "text"
+                },
+                {
+                  "key": "replicate",
+                  "label": "重复编号",
+                  "type": "text"
+                },
+                {
+                  "key": "dilution",
+                  "label": "稀释倍数",
+                  "type": "number",
+                  "min": 0
+                },
+                {
+                  "key": "od",
+                  "label": "原始OD",
+                  "type": "number"
+                },
+                {
+                  "key": "blank_corrected",
+                  "label": "空白校正OD",
+                  "type": "number"
+                },
+                {
+                  "key": "result",
+                  "label": "确认的浓度",
+                  "type": "number",
+                  "min": 0,
+                  "unit_key": "unit"
+                },
+                {
+                  "key": "unit",
+                  "label": "浓度单位",
+                  "type": "text"
+                },
+                {
+                  "key": "notes",
+                  "label": "计算 / 备注",
+                  "type": "text"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "luci": {
+      "label": "Luci 发光检测",
+      "prefix": "LUCI",
+      "statuses": [
+        [
+          "draft",
+          "草稿"
+        ],
+        [
+          "planned",
+          "计划"
+        ],
+        [
+          "running",
+          "进行中"
+        ],
+        [
+          "completed",
+          "已完成"
+        ],
+        [
+          "cancelled",
+          "已取消"
+        ]
+      ],
+      "variants": {
+        "assay": {
+          "label": "细胞本底信号",
+          "fields": [
+            {
+              "key": "objective",
+              "label": "实验目的",
+              "type": "textarea"
+            },
+            {
+              "key": "instrument",
+              "label": "仪器 / 编号",
+              "type": "text"
+            },
+            {
+              "key": "model",
+              "label": "仪器型号",
+              "type": "text"
+            },
+            {
+              "key": "manufacturer",
+              "label": "仪器厂家",
+              "type": "text"
+            },
+            {
+              "key": "software",
+              "label": "采集 / 分析软件版本",
+              "type": "text"
+            },
+            {
+              "key": "operator",
+              "label": "操作者",
+              "type": "text"
+            },
+            {
+              "key": "acquired_at",
+              "label": "读板时间（未记录可留空）",
+              "type": "datetime"
+            },
+            {
+              "key": "read_mode",
+              "label": "检测模式",
+              "type": "text"
+            },
+            {
+              "key": "plate_type",
+              "label": "检测板型 / 规格",
+              "type": "text"
+            },
+            {
+              "key": "reader_settings",
+              "label": "读板参数（积分时间、增益等）",
+              "type": "textarea"
+            },
+            {
+              "key": "seeded_date",
+              "label": "铺板日期",
+              "type": "date"
+            },
+            {
+              "key": "cells_per_well",
+              "label": "铺板细胞数（cells / 孔）",
+              "type": "number",
+              "min": 0,
+              "integer": true
+            },
+            {
+              "key": "culture_hours",
+              "label": "培养时长（h）",
+              "type": "number",
+              "min": 0
+            },
+            {
+              "key": "medium_volume",
+              "label": "每孔加底物前培养液体积",
+              "type": "number",
+              "min": 0,
+              "unit_key": "medium_volume_unit"
+            },
+            {
+              "key": "medium_volume_unit",
+              "label": "培养液体积单位",
+              "type": "text"
+            },
+            {
+              "key": "substrate_name",
+              "label": "发光底物名称",
+              "type": "text"
+            },
+            {
+              "key": "substrate_brand",
+              "label": "底物品牌 / 厂家",
+              "type": "text"
+            },
+            {
+              "key": "substrate_catalog",
+              "label": "底物货号",
+              "type": "text"
+            },
+            {
+              "key": "substrate_lot",
+              "label": "底物批号",
+              "type": "text"
+            },
+            {
+              "key": "stock_concentration",
+              "label": "底物母液浓度",
+              "type": "number",
+              "min": 0,
+              "unit_key": "stock_unit"
+            },
+            {
+              "key": "stock_unit",
+              "label": "母液浓度单位",
+              "type": "text"
+            },
+            {
+              "key": "substrate_preparation",
+              "label": "底物配制、保存与使用前处理",
+              "type": "textarea"
+            },
+            {
+              "key": "substrate_volume",
+              "label": "每孔加入底物体积",
+              "type": "number",
+              "min": 0,
+              "unit_key": "substrate_volume_unit"
+            },
+            {
+              "key": "substrate_volume_unit",
+              "label": "底物体积单位",
+              "type": "text"
+            },
+            {
+              "key": "incubation_minutes",
+              "label": "加底物后孵育时长（min）",
+              "type": "number",
+              "min": 0
+            },
+            {
+              "key": "incubation_conditions",
+              "label": "孵育温度 / 避光条件",
+              "type": "text"
+            },
+            {
+              "key": "results_notes",
+              "label": "结果、重复定义与异常说明",
+              "type": "textarea"
+            }
+          ],
+          "tables": [
+            {
+              "key": "samples",
+              "label": "细胞实验孔与原始发光读数",
+              "columns": [
+                {
+                  "key": "sample",
+                  "label": "样本编号",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "source",
+                  "label": "细胞来源",
+                  "type": "source"
+                },
+                {
+                  "key": "well",
+                  "label": "检测孔位",
+                  "type": "text"
+                },
+                {
+                  "key": "group",
+                  "label": "实验分组",
+                  "type": "text"
+                },
+                {
+                  "key": "technical_replicate",
+                  "label": "技术重复编号",
+                  "type": "text"
+                },
+                {
+                  "key": "raw_value",
+                  "label": "原始 Lum 读数",
+                  "type": "number"
+                },
+                {
+                  "key": "unit",
+                  "label": "读数单位 / 仪器原文",
+                  "type": "text"
+                },
+                {
+                  "key": "notes",
+                  "label": "备注",
+                  "type": "text"
+                }
+              ]
+            },
+            {
+              "key": "raw_plate",
+              "label": "全板原始读数（未定义孔不自动视为对照）",
+              "columns": [
+                {
+                  "key": "well",
+                  "label": "孔位",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "value",
+                  "label": "原始 Lum 读数",
+                  "type": "number"
+                },
+                {
+                  "key": "unit",
+                  "label": "读数单位 / 仪器原文",
+                  "type": "text"
+                },
+                {
+                  "key": "annotation",
+                  "label": "孔位定义 / 读图说明",
+                  "type": "text"
+                }
+              ]
+            },
+            {
+              "key": "summary",
+              "label": "分组汇总（可选，注明技术重复定义）",
+              "columns": [
+                {
+                  "key": "group",
+                  "label": "实验分组",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "mean",
+                  "label": "均值",
+                  "type": "number"
+                },
+                {
+                  "key": "sd",
+                  "label": "标准差（SD）",
+                  "type": "number",
+                  "min": 0
+                },
+                {
+                  "key": "replicates",
+                  "label": "重复孔数",
+                  "type": "number",
+                  "min": 1,
+                  "integer": true
+                },
+                {
+                  "key": "unit",
+                  "label": "读数单位 / 仪器原文",
+                  "type": "text"
+                },
+                {
+                  "key": "notes",
+                  "label": "统计与重复定义说明",
+                  "type": "text"
+                }
+              ]
+            }
+          ],
+          "sections": [
+            {
+              "label": "实验目的",
+              "fields": [
+                "objective"
+              ]
+            },
+            {
+              "label": "仪器与读板",
+              "fields": [
+                "instrument",
+                "model",
+                "manufacturer",
+                "software",
+                "operator",
+                "acquired_at",
+                "read_mode",
+                "plate_type",
+                "reader_settings"
+              ]
+            },
+            {
+              "label": "铺板与培养",
+              "fields": [
+                "seeded_date",
+                "cells_per_well",
+                "culture_hours",
+                "medium_volume",
+                "medium_volume_unit"
+              ]
+            },
+            {
+              "label": "发光底物与孵育",
+              "fields": [
+                "substrate_name",
+                "substrate_brand",
+                "substrate_catalog",
+                "substrate_lot",
+                "stock_concentration",
+                "stock_unit",
+                "substrate_preparation",
+                "substrate_volume",
+                "substrate_volume_unit",
+                "incubation_minutes",
+                "incubation_conditions"
+              ]
+            },
+            {
+              "tables": [
+                "samples"
+              ]
+            },
+            {
+              "tables": [
+                "raw_plate"
+              ],
+              "collapsed": true
+            },
+            {
+              "tables": [
+                "summary"
+              ],
+              "collapsed": true
+            },
+            {
+              "label": "结果说明",
+              "fields": [
+                "results_notes"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "treatment": {
+      "label": "通用处理记录",
+      "prefix": "OBS",
+      "statuses": [
+        [
+          "draft",
+          "草稿"
+        ],
+        [
+          "planned",
+          "计划"
+        ],
+        [
+          "running",
+          "进行中"
+        ],
+        [
+          "completed",
+          "已完成"
+        ],
+        [
+          "cancelled",
+          "已取消"
+        ]
+      ],
+      "variants": {
+        "observation": {
+          "label": "处理与观察",
+          "fields": [
+            {
+              "key": "objective",
+              "label": "记录目的",
+              "type": "textarea"
+            },
+            {
+              "key": "observations",
+              "label": "观察摘要",
+              "type": "textarea"
+            }
+          ],
+          "tables": [
+            {
+              "key": "samples",
+              "label": "样本与观察",
+              "columns": [
+                {
+                  "key": "sample",
+                  "label": "样本编号",
+                  "type": "text",
+                  "required": true
+                },
+                {
+                  "key": "source",
+                  "label": "培养来源",
+                  "type": "source"
+                },
+                {
+                  "key": "group",
+                  "label": "分组",
+                  "type": "text"
+                },
+                {
+                  "key": "observation",
+                  "label": "观察记录",
+                  "type": "textarea"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  }
+}

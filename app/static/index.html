@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="manifest" href="/notebook.webmanifest"><link rel="apple-touch-icon" href="/notebook-256.png"><meta name="theme-color" content="#285b46"><meta name="author" content="LumyQAQ"><title>Lab Note · 细胞培养工作台</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/relocation.css"></head>
+<body>
+<aside class="sidebar">
+  <a class="brand" href="/"><span class="brand-mark">c<span>·</span></span><span>LAB<br><strong>NOTE</strong></span></a>
+  <div class="workspace-tag">个人实验室 / LOCAL</div>
+  <nav aria-label="主导航"><button data-view="home" class="nav active"><span>⌂</span> 首页</button><button data-view="work" class="nav"><span>✓</span> 今日工作</button><button data-view="today" class="nav"><span>◉</span> 当前培养</button><button data-view="labs" class="nav"><span>▤</span> 实验记录</button><button data-view="drugs" class="nav"><span>◫</span> 药物配制 / 存储</button><button data-view="history" class="nav"><span>▦</span> 历史日记</button><button data-view="events" class="nav"><span>≡</span> 操作记录</button><button data-view="backup" class="nav"><span>↓</span> 数据与备份</button></nav>
+  <div class="sidebar-bottom"><span class="status-dot"></span> 仅保存在这台 Mac<br><small>Lab Note · 本机版</small></div>
+</aside>
+<main>
+  <header class="topbar"><div><span class="eyebrow">LABORATORY NOTEBOOK</span><h1>Lab Note 实验笔记</h1><small class="product-credit">软件作者 <a rel="author noopener" href="https://github.com/LumyQAQ" target="_blank">LumyQAQ</a></small></div><div class="header-utilities"><div class="today-date" id="today-date"></div><button type="button" class="button secondary" id="undo-last" disabled>↶ 撤销上一步</button></div></header>
+  <div id="connection" class="connection" hidden></div>
+  <div id="content" aria-live="polite"></div>
+</main>
+<dialog id="create-dialog"><form id="create-form"><div class="dialog-head"><div><span class="eyebrow">NEW CULTURE</span><h2>添加培养容器</h2></div><button type="button" class="icon-button" id="close-create" aria-label="关闭">×</button></div><label>容器名称<input name="name" required maxlength="120" placeholder="例如：PBMC 第 1 批扩增"></label><div class="two"><label>培养容器<select name="type" id="container-type"></select></label><label>存放位置<input name="location" placeholder="例如：培养箱 1 · 上层"></label></div><label class="group-quantity-field">瓶 / 皿数量<input name="quantity" id="container-quantity" type="number" min="1" max="100" step="1" value="1" required disabled><small class="muted" id="create-quantity-help">孔板按一块记录。</small></label><label class="recipe-picker">完全培养基<select id="create-recipe"></select><small class="muted">新填写的孔、瓶或皿将带入所选配方。</small></label><details id="create-recipe-details" hidden><summary>查看或修改配方</summary><div id="create-recipe-fields"></div></details><p class="muted">创建后，点击孔位填写细胞和 Day 0。同一块孔板可以记录不同细胞和处理。</p><div class="dialog-actions"><button type="button" class="button secondary" id="cancel-create">取消</button><button class="button primary" type="submit">创建容器</button></div></form></dialog>
+<div id="toast" class="toast" role="status" hidden></div>
+<dialog id="transfer-dialog" class="transfer-dialog"></dialog>
+<dialog id="archive-culture-dialog" class="transfer-dialog"></dialog>
+<dialog id="occupied-target-dialog" class="transfer-dialog"></dialog>
+<dialog id="transfer-review-dialog" class="transfer-dialog"></dialog>
+<dialog id="transfer-system-dialog" class="transfer-dialog"></dialog>
+<dialog id="lineage-dialog" class="transfer-dialog"></dialog>
+<dialog id="edit-container-dialog"></dialog>
+<dialog id="manual-group-dialog"></dialog>
+<dialog id="well-group-dialog" class="wide-dialog"></dialog>
+<dialog id="relocation-dialog" class="transfer-dialog"></dialog>
+<dialog id="quick-medium-dialog"></dialog>
+<dialog id="activity-dialog"></dialog>
+<dialog id="journal-dialog"></dialog>
+<dialog id="undo-dialog"></dialog>
+<dialog id="lab-record-dialog"></dialog>
+<script src="/groups.js"></script>
+<link rel="stylesheet" href="/manual-groups.css">
+<script src="/manual-groups.js"></script>
+<link rel="stylesheet" href="/well-groups.css">
+<script src="/well-groups.js"></script>
+<script src="/selection.js"></script>
+<link rel="stylesheet" href="/source-picker.css">
+<script src="/source-picker.js"></script>
+<link rel="stylesheet" href="/replate.css">
+<script src="/replate.js"></script>
+<script src="/transfer-cards.js"></script>
+<link rel="stylesheet" href="/occupied-targets.css">
+<script src="/occupied-targets.js"></script>
+<script src="/assay-groups.js"></script>
+<script src="/transfer.js"></script>
+<script src="/relocation.js"></script>
+<script src="/autocomplete.js"></script>
+<link rel="stylesheet" href="/medium.css">
+<link rel="stylesheet" href="/count.css">
+<script src="/medium.js"></script>
+<link rel="stylesheet" href="/quick-medium.css">
+<script src="/quick-medium.js"></script>
+<script src="/count.js"></script>
+<link rel="stylesheet" href="/workday.css">
+<link rel="stylesheet" href="/home.css">
+<script src="/workday.js"></script>
+<script src="/home.js"></script>
+<link rel="stylesheet" href="/experiments.css">
+<script src="/experiments.js"></script>
+<script src="/lineage-links.js"></script>
+<link rel="stylesheet" href="/archived-cultures.css">
+<script src="/archived-cultures.js"></script>
+<script src="/app.js"></script>
+</body></html>

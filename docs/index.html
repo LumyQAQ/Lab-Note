@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN" data-type="software">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="page-type" content="software"><meta name="site-kind" content="software">
+<title>Lab Note · 实验笔记</title><meta name="author" content="LumyQAQ"><meta name="description" content="一款本地运行的细胞培养与实验记录工作台。预览空白孔板，下载程序并在自己的设备上开始记录。">
+<meta property="og:title" content="Lab Note · 实验笔记"><meta property="og:description" content="按孔位整理培养日记、操作历史与实验记录。"><meta property="og:type" content="website"><meta name="theme-color" content="#f6f6ee">
+<link rel="icon" href="assets/notebook.png"><link rel="stylesheet" href="share.css"><script defer src="share.js"></script></head>
+<body><a class="skip" href="#main">跳到正文</a>
+<header class="top"><div class="wrap nav"><a class="brand" href="#main"><img width="38" height="38" src="assets/notebook.png" alt=""><span>Lab Note</span></a><nav aria-label="页面导航"><a href="#workbench">工作台</a><a href="#install">安装</a><a class="repo" href="https://github.com/LumyQAQ/Lab-Note">GitHub ↗</a></nav></div></header>
+<main id="main">
+<section class="intro"><div class="wrap hero">
+<div class="intro-copy" data-enter><p class="kicker">个人实验笔记 <span>v1.0</span></p><h1 lang="en">Lab Note<span aria-hidden="true">.</span></h1><p class="lead">从一个培养孔，查到它的来源、每天的观察和后续实验。</p>
+<div class="hero-actions"><a class="button" href="downloads/lab-note-v1.0.zip" download>下载本地版 <span aria-hidden="true">↓</span></a><a class="inline" href="#install">运行说明 ↘</a></div>
+<p class="platforms">macOS 本机版 <b>·</b> 软件作者 <a rel="author noopener" href="https://github.com/LumyQAQ" target="_blank">LumyQAQ</a></p>
+</div>
+<div class="demo" id="plate-demo" aria-label="空白孔板模板" data-enter>
+<div class="demo-head"><div><p class="micro">孔位预览 · 0 / 24 已填写</p><h2>空白孔板</h2></div><span class="format">24 孔板</span></div>
+<div class="plate" id="plate" role="group" aria-label="选择培养孔"></div>
+<noscript><p>启用 JavaScript 可试选孔位。下方提供工作台截图与程序下载。</p></noscript>
+<div class="legend"><span><i></i>空孔</span><span><i class="picked"></i>当前选中</span></div>
+<div class="record" aria-live="polite"><div class="coordinate" id="coord">—</div><div><strong id="sample">尚未选孔</strong><p id="summary">点选孔位，可预览空孔状态。</p></div></div>
+</div>
+</div></section>
+<section class="work" id="workbench"><div class="wrap"><div class="work-head"><div><p class="kicker">培养工作台</p><h2>按孔记录，按天回看。</h2></div><p>从首页进入一块孔板，给选中的几个孔统一登记操作。单孔条件发生变化时，也可以分别记录。</p></div>
+<figure><img src="assets/workbench.png" alt="全新安装后的工作台首页，培养容器与实验记录均为空" width="1280" height="800" loading="lazy"></figure>
+<div class="features"><article><h3>培养与流转</h3><p>记录 Day 0、培养体系、换液和计数。传孔时可逐孔对应，或把同一来源分到不同条件组。</p></article><article><h3>样本与实验</h3><p>从来源孔进入实验记录，关联样本、分组和原始文件索引。支持流式、Western Blot、PCR / qPCR、ELISA 和发光检测等记录。</p></article><article><h3>日记与备份</h3><p>查看当日待核对的培养，按日期查历史快照。可导出日记、操作日志及含校验信息的数据库备份。</p></article></div>
+</div></section>
+<section class="install" id="install"><div class="wrap install-inner"><div><p class="kicker">本机运行</p><h2>在自己的 Mac<br>打开工作台。</h2><p class="install-lead">数据保存在你的 Mac。首次启动时，培养容器和实验记录均为空。</p><a class="button pale" href="downloads/lab-note-v1.0.zip" download>下载程序 ZIP <span aria-hidden="true">↓</span></a></div>
+<ol class="steps"><li><h3>解压程序</h3><p>准备 macOS 和 Python 3.9 或更新版本，解压下载的文件夹。</p></li><li><h3>打开实验日记</h3><p>双击「启动实验日记.command」。也可在文件夹中运行：</p><code>python3 app/launch.py</code><p>浏览器会打开本机工作台。首次使用从空白数据库开始。</p></li><li><h3>登记第一份培养记录</h3><p>进入「当前培养」，点「新增容器」，选择容器和孔位后填写细胞信息。</p></li></ol>
+</div></section></main>
+<footer><div class="wrap footer"><a href="verification.html">验证下载包</a><span>Lab Note · 软件作者 <a rel="author noopener" href="https://github.com/LumyQAQ" target="_blank">LumyQAQ</a></span><a href="#main">回到顶部 ↑</a></div></footer>
+</body></html>

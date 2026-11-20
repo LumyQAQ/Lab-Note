@@ -1,0 +1,16 @@
+.target-well .target-well-content {display:block;max-width:100%;font-size:.67rem;line-height:1.3;white-space:normal;overflow-wrap:anywhere;margin-top:.3rem;}
+.target-well .target-well-content-occupied {color:#946124;}
+.target-well .target-well-content-planned {color:#315c94;font-weight:650;}
+.target-well .target-well-content-moving {color:var(--muted,#6b7280);}
+.target-well:has(.target-well-content-planned) {border-style:dashed;border-color:#688bb8;}
+.target-well.selected .target-well-content {color:inherit;}
+#occupied-target-dialog .occupied-comparison {border:1px solid var(--line,#d8dce2);border-radius:.65rem;padding:.8rem 1rem;margin:.75rem 0;}
+#occupied-target-dialog .occupied-comparison h3 {margin:0 0 .65rem;}
+#occupied-target-dialog .occupied-source {padding:.6rem 0;border-bottom:1px solid var(--line,#e4e7eb);}
+#occupied-target-dialog .occupied-source:last-child {border-bottom:0;}
+#occupied-target-dialog .occupied-source p {margin:.35rem 0;}
+#occupied-target-dialog .occupied-planned {border-left:3px solid #688bb8;padding-left:.75rem;margin:.75rem 0;}
+#occupied-target-dialog .occupied-choice-consequence {padding:.8rem 1rem;background:var(--surface,#f5f7fa);border-left:3px solid #b88636;line-height:1.6;}
+#occupied-target-dialog .occupied-choice-actions {display:flex;flex-wrap:wrap;gap:.65rem;position:sticky;bottom:0;background:var(--panel,#fff);padding:1rem 0 .25rem;}
+#occupied-target-dialog .occupied-choice-actions button {flex:1 1 10rem;white-space:normal;}
+@media (max-width:600px) {#occupied-target-dialog .occupied-choice-actions {position:static;flex-direction:column;}#occupied-target-dialog .occupied-choice-actions button {flex:auto;}}

@@ -1,0 +1,22 @@
+#relocation-dialog{width:min(1180px,96vw)}
+#relocation-dialog>.actions{margin:12px 0}
+.relocation-plates{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start}
+.relocation-plates .panel{min-width:0;overflow-x:auto}
+.relocation-plates h3{margin-top:15px}
+.relocation-plates label{margin-top:0}
+.relocation-grid{display:grid;gap:6px;min-width:340px;padding:5px;margin:16px 0;user-select:none;-webkit-user-select:none}
+.relocation-well{min-width:0;min-height:43px;aspect-ratio:1;border:1px solid #d3ddd0;border-radius:50%;background:#f7f9f4;color:#6d7f67;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:3px}
+.relocation-well strong{font-size:11px;font-weight:500}
+.relocation-well small{max-width:100%;font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.relocation-well.occupied{background:#e5eddf;color:#355f3d}
+.relocation-well.selected{background:#dcebd5;border-color:#4c7650;box-shadow:inset 0 0 0 1px #4c7650}
+.relocation-well[draggable=true]{cursor:grab}
+.relocation-well[draggable=true]:active{cursor:grabbing}
+.relocation-well.anchor{outline:2px solid #a87531;outline-offset:2px}
+.relocation-well.preview{background:#e0ecef;border:2px dashed #386c83;color:#245b71}
+.relocation-well.conflict{background:#f7e4dd;border:2px solid #a54c37;color:#8e3d2b}
+.relocation-well:disabled{opacity:.65}
+.relocation-review{background:#eff4eb;border:1px solid var(--line);border-radius:10px;padding:17px;line-height:1.8;font-size:12px;overflow-wrap:anywhere}
+.relocation-review p:last-child{margin-bottom:0}
+#relocation-error{color:#9b4332;font-size:13px;line-height:1.8;margin:12px 0 0}
+@media(max-width:760px){#relocation-dialog .relocation-plates{grid-template-columns:1fr}.relocation-grid{min-width:310px}.relocation-well{min-height:34px}}
