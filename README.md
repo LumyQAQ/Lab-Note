@@ -11,12 +11,12 @@
 
 | 系统 | 下载 | 启动 |
 | --- | --- | --- |
-| Windows 10 / 11 x64 | [1.2.0-preview.1 预览版 ZIP](https://github.com/LumyQAQ/Lab-Note/releases/download/v1.2.0-preview.1/Lab-Note-1.2.0-preview.1-Windows-x64.zip) | 全部解压后双击 `Start-Lab-Note.cmd`，已附 Python |
-| macOS | [1.2.0 正式版 ZIP](docs/downloads/lab-note-v1.2.0.zip) | 安装 Python 3.9+，双击「启动实验日记.command」 |
+| Windows 10 / 11 x64 | [1.2.1-preview.1 预览版 ZIP](https://github.com/LumyQAQ/Lab-Note/releases/download/v1.2.1-preview.1/Lab-Note-1.2.1-preview.1-Windows-x64.zip) | 全部解压后双击 `Start-Lab-Note.cmd`，已附 Python |
+| macOS | [1.2.1 正式版 ZIP](docs/downloads/lab-note-v1.2.1.zip) | 安装 Python 3.9+，双击「启动实验日记.command」 |
 
 ## 本次更新
 
-Excel 粘贴结果支持逐行预览，自动跳过单位冲突或匹配不唯一的行。当前培养支持白底和黑底 96 孔板，可折叠培养组与来源关系。保存孔组、移孔或所选孔换液后会清除对应选区。
+填写体积、质量、浓度和时长时，可以直接选择常用单位，也可以输入自定义单位。体积可选 μL、mL、L 和 nL。切换单位会保留已填数值，不会自动换算。
 
 ## Windows 本机预览版
 
@@ -32,7 +32,7 @@ Excel 粘贴结果支持逐行预览，自动跳过单位冲突或匹配不唯�
 
 默认优先使用 8875，端口冲突时自动改用空闲端口。要切换运行中服务的端口，先执行 `Stop-Lab-Note.cmd`。记录和日志位于 `%LOCALAPPDATA%\Lab Note`。可双击 `Check-Lab-Note.cmd` 用临时库自检。
 
-主分支包含两平台的共用源码。Windows 预览版附件见 [v1.2.0-preview.1](https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.2.0-preview.1)。
+主分支包含两平台的共用源码。Windows 预览版附件见 [v1.2.1-preview.1](https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.2.1-preview.1)。
 <!-- repository-only:end -->
 
 [软件署名及发布校验](AUTHORS.md)

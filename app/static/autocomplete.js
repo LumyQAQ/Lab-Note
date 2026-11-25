@@ -51,3 +51,44 @@ function attachHistoryAutocomplete(input,list,getNames,{label='名称',filter=fi
   });
 }
 if(typeof module!=='undefined')module.exports={cellNameHistory,filterCellNames,treatmentHistory,filterTreatments};
+
+const unitPresets = {
+  volume: ['μL','mL','L','nL'],
+  mass: ['μg','mg','g','ng'],
+  concentration: ['ng/mL','μg/mL','mg/mL','ng/μL','μg/μL','nM','μM','mM','M','%','U/mL','IU/mL'],
+  duration: ['min','h','s','d']
+};
+
+// The editable input remains the source of truth, including for custom and legacy values.
+function unitChoice(input, units, label='单位', quantity=false) {
+  const options=units.map(unit=>`<option value="${esc(unit)}">${esc(unit)}</option>`).join('');
+  return `<span class="unit-choice">${input}<select data-unit-choice="${quantity?'quantity':'unit'}" aria-label="${esc(label)}常用选项"><option value="">选单位</option>${options}</select></span>`;
+}
+
+function quantityWithUnit(value, unit, choices) {
+  const text=value.trimEnd();
+  const previous=choices.slice().sort((a,b)=>b.length-a.length).find(candidate=>{
+    if(!text.endsWith(candidate))return false;
+    const prefix=text.slice(0,-candidate.length);
+    return !prefix || /[\d\s]$/.test(prefix);
+  });
+  const simpleAmount=/^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)(?:\s*[^\d\s][^\s]*)?$/i.exec(text);
+  const amount=previous?text.slice(0,-previous.length).trimEnd():(simpleAmount?.[1]??text);
+  return amount?amount+' '+unit:unit;
+}
+
+if(typeof document!=='undefined')document.addEventListener('change', event=>{
+  const picker=event.target.closest?.('select[data-unit-choice]');
+  if(!picker||!picker.value)return;
+  const input=picker.parentElement.querySelector('input');
+  const unit=picker.value;
+  picker.selectedIndex=0;
+  if(input.matches(':disabled')||input.readOnly)return;
+  const wasEmpty=!input.value;
+  const quantity=picker.dataset.unitChoice==='quantity';
+  input.value=quantity?quantityWithUnit(input.value,unit,[...picker.options].slice(1).map(option=>option.value)):unit;
+  input.dispatchEvent(new Event('input',{bubbles:true}));
+  input.dispatchEvent(new Event('change',{bubbles:true}));
+  input.focus();
+  if(quantity&&wasEmpty)input.setSelectionRange(0,0);
+},true);

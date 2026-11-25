@@ -53,20 +53,28 @@ const labStatusLabel = record => labModules()[record.type]?.statuses.find(item =
 const labTypeLabel = record => labModules()[record.type]?.label || record.type;
 const labVariant = record => labModules()[record.type]?.variants[record.variant] || {label:record.variant, fields:[], tables:[]};
 const labRowId = () => globalThis.crypto?.randomUUID?.() || `row-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-const labNucleicUnits = {unit:['ng/μL','μg/μL','ng/mL','μg/mL','mg/mL','nM','μM'],volume_unit:['μL','mL','L']};
+const labNucleicUnits = {unit:['ng/μL','μg/μL','ng/mL','μg/mL','mg/mL','nM','μM'],volume_unit:unitPresets.volume};
 const labProteinConcentrationUnits = ['mg/mL','μg/μL','μg/mL','ng/μL','ng/mL'];
-const labVolumeUnits = ['μL','mL','L'];
+const labAmountUnits = [...unitPresets.volume,...unitPresets.mass];
 function labTableUnits(table) {
   const r=labEditor?.record;
   if(r?.type==='pcr'&&r.variant==='extraction'&&table==='samples')return labNucleicUnits;
-  if(r?.type==='western'&&r.variant==='protein'&&table==='samples')return {volume_unit:labVolumeUnits};
+  if(r?.type==='western'&&r.variant==='protein'&&table==='samples')return {volume_unit:unitPresets.volume};
   if(r?.type==='western'&&r.variant==='bca'&&['samples','standards'].includes(table))return {unit:labProteinConcentrationUnits};
   if(r?.type==='luci'&&r.variant==='assay'&&['samples','raw_plate','summary'].includes(table))return {unit:['RLU','counts','cps','仪器原始Lum读数（单位未显示）']};
-  if(r?.type==='drug'&&r.variant==='aliquot'){
-    if(table==='preprocessing')return {duration_unit:['min','h','s']};
-    if(['aliquots','usage'].includes(table))return {unit:[...labVolumeUnits,'mg','g']};
+  if(r?.type==='drug' && r.variant==='aliquot'){
+    if(table==='preprocessing')return {duration_unit:unitPresets.duration};
+    if(['aliquots','usage'].includes(table))return {unit:labAmountUnits};
   }
   return {};
+}
+function labTableUnitChoices(table) {
+  const r=labEditor?.record;
+  if(r?.type==='flow' && table==='results')return {unit:['%','MFI','events','a.u.']};
+  if(r?.type==='western' && r.variant==='blot' && table==='lanes')return {unit:unitPresets.mass};
+  if(r?.type==='elisa' && ['samples','standards'].includes(table))return {unit:unitPresets.concentration};
+  if(r?.type==='drug' && ['aliquots','usage'].includes(table))return {unit:labAmountUnits};
+  return labTableUnits(table);
 }
 const labUnitOverrideKey = (table,row,key) => JSON.stringify([labEditor.record.type,labEditor.record.variant,table,row,key]);
 function labRecordButton(record) {
@@ -283,10 +291,22 @@ function labDateTimeDisplay(value){
   return display+(fraction?'.'+fraction:'');
 }
 function labTableControl(table, row, field) {
-  const attrs=`data-lab-column="${esc(field.key)}"`;
-  if(!labTableUnits(table.key)[field.key])return labControl(field,row[field.key],attrs);
-  const listId=`lab-unit-${table.key}-${row.row_id}-${field.key}`;
-  return `<div class="cell-autocomplete lab-unit-control">${labControl(field,row[field.key],`${attrs} autocomplete="off" placeholder="输入或选择单位" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="${esc(listId)}"`)}<div id="${esc(listId)}" class="cell-name-suggestions lab-unit-suggestions" role="listbox" aria-label="${esc(field.label)}选项" hidden></div></div>`;
+  const input=labControl(field,row[field.key],`data-lab-column="${esc(field.key)}"`);
+  const units=labTableUnitChoices(table.key)[field.key];
+  if(units){
+    const id=`lab-unit-${table.key}-${row.row_id}-${field.key}`;
+    const combo=mediumAutocompleteInput(esc(id),`data-lab-column="${esc(field.key)}" aria-label="${esc(field.label)}" placeholder="输入或选择单位"`,row[field.key]);
+    return unitChoice(combo,units,field.label);
+  }
+  return labFormUnitChoice(field,input);
+}
+
+function labFormUnitChoice(field,input) {
+  if(field.key==='volume_unit' || field.key.endsWith('_volume_unit'))return unitChoice(input,unitPresets.volume,field.label);
+  const units={weighed_unit:unitPresets.mass, stock_unit:unitPresets.concentration, aliquot_unit:labAmountUnits,
+    reaction_volume:unitPresets.volume, working:unitPresets.concentration, template:labAmountUnits}[field.key];
+  if(!units)return input;
+  return unitChoice(input,units,field.label,!field.key.endsWith('_unit'));
 }
 function labTableMarkup(table, rows) {
   return `<section class="lab-table-section"><div class="section-head"><h3>${esc(table.label)}</h3><button type="button" class="button secondary" data-lab-add-row="${esc(table.key)}">＋ 添加一行</button></div><div class="lab-table-scroll"><table><thead><tr>${table.columns.map(f=>`<th>${esc(f.label)}${f.required?' *':''}</th>`).join('')}<th>操作</th></tr></thead><tbody>${rows.map(row=>`<tr data-lab-table="${esc(table.key)}" data-row-id="${esc(row.row_id)}">${table.columns.map(f=>`<td>${labTableControl(table,row,f)}</td>`).join('')}<td><button type="button" class="text-button" data-lab-remove-row="${esc(row.row_id)}" aria-label="删除${esc(table.label)}此行">删除</button></td></tr>`).join('')}</tbody></table>${rows.length?'':'<p class="muted lab-table-empty">尚未填写数据，点击“添加一行”开始。</p>'}</div></section>`;
@@ -306,7 +326,7 @@ function labStructuredDataMarkup(record,readonly=false) {
   return sections.map(section=>{
     const fields=(section.fields||[]).map(key=>variant.fields.find(f=>f.key===key));
     const tables=(section.tables||[]).map(key=>variant.tables.find(t=>t.key===key));
-    const fieldMarkup=!fields.length?'':readonly?`<dl class="lab-read-fields">${fields.map(f=>`<div><dt>${esc(f.label)}</dt><dd>${esc(record.data?.[f.key]||'—')}</dd></div>`).join('')}</dl>`:`<div class="lab-editor-grid">${fields.map(f=>`<label class="${f.type==='textarea'?'lab-span-two':''}">${esc(f.label)}${f.required?' *':''}${labControl(f,record.data[f.key],`data-lab-field="${esc(f.key)}"`)}</label>`).join('')}</div>`;
+    const fieldMarkup=!fields.length?'':readonly?`<dl class="lab-read-fields">${fields.map(f=>`<div><dt>${esc(f.label)}</dt><dd>${esc(record.data?.[f.key]||'—')}</dd></div>`).join('')}</dl>`:`<div class="lab-editor-grid">${fields.map(f=>`<label class="${f.type==='textarea'?'lab-span-two':''}">${esc(f.label)}${f.required?' *':''}${labFormUnitChoice(f,labControl(f,record.data[f.key],`data-lab-field="${esc(f.key)}"`))}</label>`).join('')}</div>`;
     const tableMarkup=tables.map(t=>!readonly?labTableMarkup(t,record.tables?.[t.key]||[]):`<section class="lab-table-section"><h3>${esc(t.label)}</h3><div class="lab-table-scroll"><table><thead><tr>${t.columns.map(f=>`<th>${esc(f.label)}</th>`).join('')}</tr></thead><tbody>${(record.tables?.[t.key]||[]).map(row=>`<tr>${t.columns.map(f=>`<td>${esc(valueText(f,row[f.key])??'—')}</td>`).join('')}</tr>`).join('')}</tbody></table>${record.tables?.[t.key]?.length?'':'<p class="muted">尚未填写</p>'}</div></section>`).join('');
     if(section.collapsed)return `<details class="lab-optional-section"><summary>${esc(section.label)}</summary>${fieldMarkup}${tableMarkup}</details>`;
     return `${section.label?`<h3 class="lab-field-heading">${esc(section.label)}</h3>`:''}${fieldMarkup}${tableMarkup}`;
@@ -385,10 +405,12 @@ function labBindEditor() {
   form.querySelectorAll('[data-lab-column="source"]').forEach(control=>control.addEventListener('change',()=>{
     labCollectEditor();form.querySelectorAll('[data-lab-remove-group]').forEach(button=>{button.disabled=Object.values(editor.record.tables||{}).flat().some(row=>row.source==='GROUP|'+button.dataset.labRemoveGroup);});
   }));
-  form.querySelectorAll('.lab-unit-control input').forEach(input=>{
-    const key=input.dataset.labColumn,table=input.closest('[data-lab-table]').dataset.labTable,list=document.getElementById(input.getAttribute('aria-controls'));
-    attachHistoryAutocomplete(input,list,()=>labTableUnits(table)[key],{label:'单位',filter:filterTreatments});
-    input.onclick=()=>input.dispatchEvent(new input.ownerDocument.defaultView.Event('focus'));
+  form.querySelectorAll('[data-lab-column]').forEach(input=>{
+    const key=input.dataset.labColumn,table=input.closest('[data-lab-table]').dataset.labTable;
+    const units=labTableUnitChoices(table)[key];
+    if(!units)return;
+    attachHistoryAutocomplete(input,document.getElementById(input.getAttribute('aria-controls')),()=>units,{label:'单位',filter:filterTreatments});
+    if(!labTableUnits(table)[key])return;
     const inherit=()=>{
       const row=input.closest('[data-lab-table]'),rows=[...form.querySelectorAll('[data-lab-table]')].filter(row=>row.dataset.labTable===table);
       editor.unitOverrides.add(labUnitOverrideKey(table,row.dataset.rowId,key));

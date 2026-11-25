@@ -68,3 +68,11 @@
 @media(pointer:coarse){.plate-grid,.transfer-well-grid,.source-picker-grid{touch-action:manipulation}.plate-scroll .plate-grid.dense{min-width:570px}.plate-scroll{overflow-x:auto}}
 
 .product-credit{color:var(--muted);font-size:12px}.product-credit a{color:var(--green);text-underline-offset:3px}
+
+.unit-choice {display:flex;align-items:stretch;gap:.25rem;min-width:0}
+.unit-choice > .cell-autocomplete,.unit-choice > input {flex:1 1 auto;min-width:0}
+.unit-choice > select[data-unit-choice] {width:5.3em;min-width:5.3em;flex:0 0 auto;padding-inline:.35em;cursor:pointer}
+.unit-choice:has(> input:disabled) > select {display:none}
+
+.lab-table-scroll .unit-choice {min-width:13rem}
+.lab-table-scroll .unit-choice .cell-name-suggestions {position:static}

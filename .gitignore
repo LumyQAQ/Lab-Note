@@ -101,3 +101,6 @@
 !/packaging/windows-readme.txt
 !/docs/downloads/lab-note-v1.2.0.zip
 !/docs/downloads/lab-note-v1.2.0.zip.sig
+!/tests/test_unit_choices.cjs
+!/docs/downloads/lab-note-v1.2.1.zip
+!/docs/downloads/lab-note-v1.2.1.zip.sig

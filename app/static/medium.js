@@ -38,7 +38,7 @@ function mediumAutocompleteInput(id,attributes,value){
 function mediumRowsMarkup(key,rows,namespace=''){
   return rows.map((row,index)=>`<div class="medium-row" data-medium-row>
     <label class="medium-name-label">名称${mediumAutocompleteInput(`${namespace}medium-${key}-${index}`,'data-medium-part="name" placeholder="输入名称或选择历史记录"',row.name)}</label>
-    <div class="medium-dose"><label>浓度<input data-medium-part="concentration" type="number" min="0" step="any" inputmode="decimal" placeholder="未记录" value="${esc(row.concentration)}"></label><label>单位<input data-medium-part="unit" type="text" placeholder="填写单位" value="${esc(row.unit)}"></label></div>
+    <div class="medium-dose"><label>浓度<input data-medium-part="concentration" type="number" min="0" step="any" inputmode="decimal" placeholder="未记录" value="${esc(row.concentration)}"></label><label>单位${unitChoice(`<input data-medium-part="unit" type="text" placeholder="填写单位" value="${esc(row.unit)}">`,unitPresets.concentration,'浓度单位')}</label></div>
     <button type="button" class="text-button medium-remove" data-medium-remove="${key}" data-medium-index="${index}" aria-label="移除第 ${index+1} 项">移除</button>
   </div>`).join('')||'<p class="medium-empty">尚未填写名称与浓度。</p>';
 }
