@@ -11,12 +11,16 @@
 
 | 系统 | 下载 | 启动 |
 | --- | --- | --- |
-| Windows 10 / 11 x64 | [1.1.0-preview.1 预览版 ZIP](https://github.com/LumyQAQ/Lab-Note/releases/download/v1.1.0-preview.1/Lab-Note-1.1.0-preview.1-Windows-x64.zip) | 全部解压后双击 `Start-Lab-Note.cmd`，已附 Python |
-| macOS | [1.0.0 正式版 ZIP](docs/downloads/lab-note-v1.0.zip) | 安装 Python 3.9+，双击「启动实验日记.command」 |
+| Windows 10 / 11 x64 | [1.2.0-preview.1 预览版 ZIP](https://github.com/LumyQAQ/Lab-Note/releases/download/v1.2.0-preview.1/Lab-Note-1.2.0-preview.1-Windows-x64.zip) | 全部解压后双击 `Start-Lab-Note.cmd`，已附 Python |
+| macOS | [1.2.0 正式版 ZIP](docs/downloads/lab-note-v1.2.0.zip) | 安装 Python 3.9+，双击「启动实验日记.command」 |
+
+## 本次更新
+
+Excel 粘贴结果支持逐行预览，自动跳过单位冲突或匹配不唯一的行。当前培养支持白底和黑底 96 孔板，可折叠培养组与来源关系。保存孔组、移孔或所选孔换液后会清除对应选区。
 
 ## Windows 本机预览版
 
-已在 Windows Server 2022 上用发布的 ZIP 验证启动、8875 占用时自动换端口、重复启动、空白数据库、备份和停止。[查看自检记录](https://github.com/LumyQAQ/Lab-Note/actions/runs/44755351630)
+双击 `Check-Lab-Note.cmd` 可检查解压后的启动入口、空白数据库和备份。
 
 在解压目录的 PowerShell 中运行：
 
@@ -28,7 +32,7 @@
 
 默认优先使用 8875，端口冲突时自动改用空闲端口。要切换运行中服务的端口，先执行 `Stop-Lab-Note.cmd`。记录和日志位于 `%LOCALAPPDATA%\Lab Note`。可双击 `Check-Lab-Note.cmd` 用临时库自检。
 
-主分支保留 macOS 正式版源码；Windows 预览版源码和发行附件见 [v1.1.0-preview.1](https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.1.0-preview.1)。
+主分支包含两平台的共用源码。Windows 预览版附件见 [v1.2.0-preview.1](https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.2.0-preview.1)。
 <!-- repository-only:end -->
 
 [软件署名及发布校验](AUTHORS.md)
@@ -44,9 +48,9 @@
    python3 app/launch.py
    ```
 
-3. 打开 [本机工作台](http://127.0.0.1:8875/)。首次打开是空白记录，点击「当前培养 → 新增容器」开始填写。
+3. 启动器会打开浏览器并显示实际使用的本机地址。首次打开是空白记录，点击「当前培养 → 新增容器」开始填写。
 
-分享版默认把数据保存在 `~/Library/Application Support/Culture Notes Share/`。服务仅监听本机地址 127.0.0.1，端口为 8875，可以与使用 8765 的桌面版本分别运行。
+分享版默认把数据保存在 `~/Library/Application Support/Culture Notes Share/`。服务仅监听本机地址 127.0.0.1，优先使用 8875，端口被占用时会自动选择空闲端口，可以与使用 8765 的桌面版本分别运行。
 
 ## 可以记录什么
 

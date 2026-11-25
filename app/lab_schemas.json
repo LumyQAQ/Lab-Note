@@ -616,6 +616,11 @@
                   "type": "text"
                 },
                 {
+                  "key": "plate",
+                  "label": "板号",
+                  "type": "text"
+                },
+                {
                   "key": "tube",
                   "label": "管号 / 板孔",
                   "type": "text"
@@ -708,6 +713,16 @@
                   "label": "样本编号",
                   "type": "text",
                   "required": true
+                },
+                {
+                  "key": "plate",
+                  "label": "板号",
+                  "type": "text"
+                },
+                {
+                  "key": "well",
+                  "label": "板孔",
+                  "type": "text"
                 },
                 {
                   "key": "population",
@@ -1569,6 +1584,11 @@
                   "type": "source"
                 },
                 {
+                  "key": "plate",
+                  "label": "板号",
+                  "type": "text"
+                },
+                {
                   "key": "well",
                   "label": "孔位",
                   "type": "text"
@@ -2011,6 +2031,11 @@
                   "type": "source"
                 },
                 {
+                  "key": "plate",
+                  "label": "板号",
+                  "type": "text"
+                },
+                {
                   "key": "well",
                   "label": "检测孔位",
                   "type": "text"
@@ -2046,6 +2071,11 @@
               "key": "raw_plate",
               "label": "全板原始读数（未定义孔不自动视为对照）",
               "columns": [
+                {
+                  "key": "plate",
+                  "label": "板号",
+                  "type": "text"
+                },
                 {
                   "key": "well",
                   "label": "孔位",

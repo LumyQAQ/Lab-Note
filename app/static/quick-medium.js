@@ -35,7 +35,7 @@ function openQuickMedium(id,kind='full',scope='selection'){
   const keys=requested.filter(key=>memberActive(container.wells[key]));
   if(!keys.length){toast('请选择需要换液的在培养孔位或瓶 / 皿。',true);return;}
   const wells=keys.map(key=>container.wells[key]),label=kind==='half'?'半换液':'换液',now=localMinute();
-  quickMediumDraft={id:container.id,wells:keys,kind,revision:state.revision};
+  quickMediumDraft={id:container.id,wells:keys,kind,fromPlateSelection:!!(sameCurrent&&boot.layouts[container.type]),revision:state.revision};
   dialog.classList.add('quick-medium-dialog');
   dialog.innerHTML=`<form id="quick-medium-form" novalidate>
     <div class="dialog-head"><div><span class="eyebrow">CULTURE MEDIUM</span><h2>${label}</h2></div><button type="button" class="icon-button" data-quick-medium-cancel aria-label="关闭">×</button></div>
@@ -86,7 +86,9 @@ async function saveQuickMedium(event){
   controls.forEach(control=>control.disabled=true);
   try{
     const result=await api('/api/command',{action:'activity',payload,revision:draft.revision});
-    state=result.state;dirty=false;quickMediumDraft=null;dialog.close();busy=false;render();
+    state=result.state;
+    if(draft.fromPlateSelection&&currentId===draft.id)selected.clear();
+    dirty=false;quickMediumDraft=null;dialog.close();busy=false;render();
     toast((draft.kind==='half'?'已记录半换液':'已记录换液')+(payload.confirm_checked?'，并确认今日核对':''));
   }catch(error){fail(error.message);}
   finally{busy=false;controls.forEach((control,index)=>control.disabled=disabled[index]);renderUndoControl();}

@@ -43,7 +43,7 @@ function bindInlineRelocation(root,{container,mode,getSelected,canStart,onSelect
     busy=true;
     try{
       const response=await api('/api/command',{action:'relocate',revision:pending.revision,payload:{mode,source_id:container.id,wells:pending.wells,anchor:pending.anchor,target_id:container.id,target_anchor:target}});
-      state=response.state;dirty=false;selected=new Set(result.pairs.filter(p=>p.occupied).map(p=>p.to));
+      state=response.state;dirty=false;if(currentId===container.id)selected.clear();
       render();toast(mode==='copy'?'所选孔组已复制，原孔记录保留。':'所选孔组已移动，原位置已清空。');
     }catch(error){toast(error.message,true);}finally{busy=false;if(typeof renderUndoControl==='function')renderUndoControl();}
   };

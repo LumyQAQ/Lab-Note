@@ -13,4 +13,4 @@
 
 重新发布时，按 [软件署名与发布校验](AUTHORS.md) 为确切版本的 ZIP 生成签名，再提交下载包、校验和和签名。
 
-Windows 预览包沿用独立版本标签的源码，以 GitHub Release 的预发布附件分发。主页指向具体版本的附件地址。
+Windows 与 macOS 共用主分支的应用源码。Windows 预览包由 `packaging/build_windows_local.py` 使用校验过的 Python x64 嵌入包构建，以 GitHub Release 的预发布附件分发。两平台分别签署 ZIP，并在 Windows 附件发布后运行仓库的 Windows 自检工作流。

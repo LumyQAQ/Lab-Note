@@ -50,7 +50,7 @@ function lineageLinksMarkup(container,keys,sourceState=activeState()) {
     }).join('')}</div>`;
   };
   const body=relation('upstream','上游来源',upstream)+relation('siblings','同次分装/铺板/扩孔',siblings)+relation('downstream','下游去向',downstream);
-  return body?`<section class="lineage-links" aria-label="培养来源关系"><h4>培养来源关系</h4>${body}</section>`:'';
+  return body?`<details class="lineage-links"><summary>培养来源关系 · 上游 ${upstream.size} / 同次 ${siblings.size} / 下游 ${downstream.size}</summary>${body}</details>`:'';
 }
 function bindLineageLinks(root) {
   root.querySelectorAll('[data-culture-link-id]').forEach(button=>button.onclick=()=>{

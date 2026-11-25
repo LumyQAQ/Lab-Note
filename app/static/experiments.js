@@ -379,6 +379,7 @@ function labBindEditor() {
     }else if(onClose)onClose({});
   });
   if(editor.readonly){form.onsubmit=e=>e.preventDefault();return;}
+  bindPasteButtons(editor);
   form.oninput=()=>{dirty=true;};
   form.onchange=()=>{dirty=true;};
   form.querySelectorAll('[data-lab-column="source"]').forEach(control=>control.addEventListener('change',()=>{
@@ -445,4 +446,19 @@ function labBindEditor() {
     try{const result=await api('/api/command',{action:'lab_record_save',revision:editor.revision,payload});state=result.state;const returning=!!editor.onClose;editor.savedRecordId=r.id||state.lab_records.at(-1).id;editor.saving=false;busy=false;labCloseEditor(true);if(!returning){if(!r.id){frozen=null;view=r.type==='drug'?'drugs':'labs';if(r.type!=='drug')labModuleFilter=r.type;}render();}toast('实验记录已保存。');}
     catch(error){editor.saving=false;busy=false;form.querySelectorAll('button,input,select,textarea').forEach(input=>{input.disabled=input.dataset.labWasDisabled==='true';});$('#lab-save-error').textContent=error.message;$('#lab-save-error').hidden=false;toast(error.message,true);}
   };
+}
+
+function labApplyPastePlan(key,plan) {
+  const rows=labEditor.record.tables[key] ||= [];
+  for(const entry of plan) {
+    if(entry.status!=='新增' && entry.status!=='更新')continue;
+    const row=entry.status==='新增'?{row_id:labRowId()}:rows[entry.rowIndex];
+    Object.assign(row,entry.patch);
+    for(const unit of Object.keys(labTableUnits(key))){
+      if(Object.hasOwn(entry.patch,unit))labEditor.unitOverrides.add(labUnitOverrideKey(key,row.row_id,unit));
+    }
+    if(entry.status==='新增')rows.push(row);
+  }
+  dirty=true;
+  labDrawEditor();
 }

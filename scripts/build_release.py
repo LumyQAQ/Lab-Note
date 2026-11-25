@@ -15,6 +15,8 @@ app/lab_exports.py
 app/lab_records.py
 app/lab_schemas.json
 app/launch.py
+app/platform_config.py
+app/tzdata/Shanghai.tzif
 app/manual_groups.py
 app/medium.py
 app/occupied_targets.py
@@ -30,6 +32,7 @@ app/static/count.css
 app/static/count.js
 app/static/experiments.css
 app/static/experiments.js
+app/static/result-paste.js
 app/static/groups.js
 app/static/home.css
 app/static/home.js
@@ -72,7 +75,7 @@ tests/test_public_app.py
 
 
 def main():
-    target = ROOT / 'docs/downloads/lab-note-v1.0.zip'
+    target = ROOT / 'docs/downloads/lab-note-v1.2.0.zip'
     target.parent.mkdir(parents=True, exist_ok=True)
     pending = target.with_suffix('.tmp')
     with zipfile.ZipFile(pending, 'w', compression=zipfile.ZIP_DEFLATED) as archive:

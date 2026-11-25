@@ -9,3 +9,7 @@
 .assay-source-units{margin:18px 0;padding:15px;border:1px solid var(--line);border-radius:10px}.assay-source-unit{padding:10px 0;border-top:1px solid var(--line)}.assay-source-unit small{display:block;color:var(--muted);margin:6px 0}.assay-source-unit summary{cursor:pointer;color:var(--green)}
 
 .lab-inline-status{min-width:110px;max-width:180px}.lab-inventory-shortcut{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border-top:1px solid var(--line);padding:16px 0;color:var(--muted);font-size:13px}
+
+#result-paste-dialog{width:min(1050px,96vw);max-height:92vh;overflow:auto}
+.paste-preview{max-height:42vh;overflow:auto}.paste-preview td{white-space:normal;overflow-wrap:anywhere}
+.paste-filters{display:flex;gap:6px}.paste-filters [aria-pressed="true"]{font-weight:bold}

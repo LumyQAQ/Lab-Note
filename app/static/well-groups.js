@@ -38,9 +38,13 @@ function defaultWellGroupName(container,keys){
   const cells=[...new Set(keys.map(key=>container.wells[key]?.cell).filter(Boolean))];
   return cells.length===1?cells[0].slice(0,120):keys.length?'培养组':'';
 }
+let expandedWellGroupBoard='';
 function wellGroupControlsMarkup(container,readonly){
   if(!boot.layouts[container.type])return '';
-  return `<section class="well-group-controls" aria-label="培养组选择">${!readonly?`<div class="well-group-tools"><span class="well-selection-switch" role="group" aria-label="培养组选择范围">${[['group','整组'],['single','单孔']].map(([mode,label])=>`<button type="button" data-well-selection-mode="${mode}" aria-pressed="${wellSelectionMode===mode}" class="${wellSelectionMode===mode?'active':''}">${label}</button>`).join('')}</span><button type="button" class="button secondary well-group-add" id="bind-well-group">＋ 新增培养组</button><span class="muted">${wellSelectionMode==='group'?'点击成员会选中整个培养组':'按单孔选择，可单独操作组内成员'} · 已建 ${container.well_groups?.length||0} 组 · ${availableWellGroupMembers(container).length} 个在培养孔未分组</span></div>`:''}${container.well_groups?.length?`<div class="well-group-chips">${container.well_groups.map(group=>`<span class="well-group-chip"><button type="button" data-well-group-select="${esc(group.id)}" aria-pressed="false" title="点击切换此组；按住 Shift 或 Command/Ctrl 可多选"><strong>${esc(group.name)}</strong><small>${group.wells.map(esc).join(' · ')}</small></button>${!readonly?`<button type="button" data-well-group-edit="${esc(group.id)}" class="well-group-edit" aria-label="编辑培养组 ${esc(group.name)}">编辑</button>`:''}</span>`).join('')}</div>`:''}</section>`;
+  const scope=JSON.stringify([container.id,frozen?.id||'']);
+  const ungrouped=availableWellGroupMembers(container).length;
+  if(expandedWellGroupBoard!==scope)expandedWellGroupBoard='';
+  return `<section class="well-group-controls" aria-label="培养组选择">${!readonly?`<div class="well-group-tools"><span class="well-selection-switch" role="group" aria-label="培养组选择范围">${[['group','整组'],['single','单孔']].map(([mode,label])=>`<button type="button" data-well-selection-mode="${mode}" aria-pressed="${wellSelectionMode===mode}" class="${wellSelectionMode===mode?'active':''}">${label}</button>`).join('')}</span><button type="button" class="button secondary well-group-add" id="bind-well-group">＋ 新增培养组</button></div>`:''}${container.well_groups?.length?`<details class="well-group-directory" data-group-directory="${esc(scope)}" ${expandedWellGroupBoard===scope?'open':''}><summary><strong>培养组 · ${container.well_groups.length} 组</strong><span>${ungrouped?'未分组 '+ungrouped+' 孔':'全部已分组'}</span></summary><div class="well-group-chips">${container.well_groups.map(group=>`<span class="well-group-chip"><button type="button" data-well-group-select="${esc(group.id)}" aria-pressed="false" title="点击切换此组；按住 Shift 或 Command/Ctrl 可多选"><strong>${esc(group.name)}</strong><small>${group.wells.map(esc).join(' · ')}</small></button>${!readonly?`<button type="button" data-well-group-edit="${esc(group.id)}" class="well-group-edit" aria-label="编辑培养组 ${esc(group.name)}">编辑</button>`:''}</span>`).join('')}</div></details>`:''}</section>`;
 }
 function refreshWellGroupControls(container){
   const button=$('#bind-well-group');
@@ -51,6 +55,9 @@ function refreshWellGroupControls(container){
   });
 }
 function bindWellGroupControls(container,readonly,selectKeys){
+  const directory=$('#detail [data-group-directory]');
+  if(directory)directory.ontoggle=()=>{if(directory.isConnected)expandedWellGroupBoard=directory.open?directory.dataset.groupDirectory:'';};
+
   document.querySelectorAll('#detail [data-well-selection-mode]').forEach(button=>button.onclick=()=>{
     if(busy||frozen||readonly||!canLeave())return;
     dirty=false;wellSelectionMode=button.dataset.wellSelectionMode;
@@ -126,10 +133,9 @@ async function commitWellGroup(action,payload,continueAdding=false){
   busy=true;controls.forEach(control=>control.disabled=true);$('#well-group-error').hidden=true;
   try{
     const result=await api('/api/command',{action,payload,revision:draft.revision});state=result.state;
-    if(action==='well_group_save')selected=wellGroupSelection(state.containers.find(c=>c.id===draft.containerId),draft.wells);
+    if(currentId===draft.containerId)selected.clear();
     wellGroupDraft=null;dirty=false;d.close();busy=false;
     const next=continueAdding&&action==='well_group_save'&&availableWellGroupMembers(state.containers.find(c=>c.id===draft.containerId)).length>=2;
-    if(next)selected.clear();
     render();
     if(next){openWellGroup();toast('当前组已保存，请继续选择下一组的孔位。');}
     else toast(action==='well_group_remove'?'已解除培养组绑定，孔位记录保留。':'已保存培养组，每个组都可独立选择和编辑。');
