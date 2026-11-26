@@ -114,3 +114,7 @@
 !/tests/test_replate_layout.cjs
 !/docs/downloads/lab-note-v1.3.0.zip
 !/docs/downloads/lab-note-v1.3.0.zip.sig
+!/tests/test_cache.py
+!/docs/downloads/lab-note-v1.4.0.zip
+!/docs/downloads/lab-note-v1.4.0.zip.sig
+!/tests/test_cryo_filters.cjs

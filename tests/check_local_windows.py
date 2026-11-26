@@ -48,6 +48,13 @@ def main():
                 req=Request(base+'/api/command',data=command_data,headers={'Content-Type':'application/json','X-Lab-Token':boot['token']})
                 with http.open(req,timeout=10) as res: updated=json.load(res)['state']
                 assert len(updated['cryo_storage']['devices'])==1 and updated['revision']==boot['state']['revision']+1
+            # Confirm free-text fields survive a real save with the bundled Windows runtime.
+            lot_data={'name':'Inventory check','at':'2020-01-01','vials':1,'storage_stage':'unassigned',
+                      'cell_kind':'Custom category','resistance_tags':['Test tag']}
+            req=Request(base+'/api/command',data=json.dumps({'action':'cryo_stock_create','revision':updated['revision'],
+                        'payload':lot_data}).encode(),headers={'Content-Type':'application/json','X-Lab-Token':boot['token']})
+            with http.open(req,timeout=10) as res: lot=json.load(res)['state']['frozen_batches'][0]
+            assert lot['cell_kind']==lot_data['cell_kind'] and lot['resistance_tags']==lot_data['resistance_tags']
             req=Request(base+'/api/backup',data=b'{}',headers={'Content-Type':'application/json','X-Lab-Token':boot['token']})
             with http.open(req,timeout=10) as res:backup=json.load(res)
             with http.open(base+backup['url'],timeout=10) as res, ZipFile(io.BytesIO(res.read())) as z:

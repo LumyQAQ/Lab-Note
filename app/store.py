@@ -145,6 +145,10 @@ class Store:
         self._recipe_cursor = -1
         self._recipe_last_undo = 0
         self._recipe_cache = {}
+        self._recipe_raw_seen = set()
+        self._recipe_result = []
+        self._event_cache = {}
+        self._event_cursor = 0
         with self.connect() as conn:
             conn.executescript('''
                 CREATE TABLE IF NOT EXISTS current_state (
@@ -250,28 +254,36 @@ class Store:
             newest, last_undo = conn.execute(
                 'SELECT COALESCE(MAX(id),0), (SELECT COALESCE(MAX(undo_event_id),0) FROM reversals) FROM events'
             ).fetchone()
-            if newest != self._recipe_cursor or last_undo != self._recipe_last_undo:
-                rebuild = newest < self._recipe_cursor or last_undo != self._recipe_last_undo
-                cursor = -1 if rebuild else self._recipe_cursor
-                history = {} if rebuild else self._recipe_cache.copy()
+            if (newest, last_undo) == (self._recipe_cursor, self._recipe_last_undo):
+                return deepcopy(self._recipe_result)
+            rebuild = self._recipe_cursor < 0 or newest < self._recipe_cursor or last_undo != self._recipe_last_undo
+            cursor = -1 if rebuild else self._recipe_cursor
+            history = {} if rebuild else self._recipe_cache.copy()
+            seen = set() if rebuild else self._recipe_raw_seen.copy()
 
-                def remember(containers):
-                    for medium in saved_media(containers):
-                        if medium and medium.get('base'):
+            def remember(containers):
+                for medium in saved_media(containers):
+                    if medium and medium.get('base'):
+                        fingerprint = json.dumps(medium, sort_keys=True, separators=(',', ':'))
+                        if fingerprint not in seen:
+                            seen.add(fingerprint)
                             recipe = merge_medium(None, medium)
                             history.setdefault(recipe_key(recipe), recipe)
 
-                # A submitted patch can contain just one changed serum percentage.
-                # Only the resulting saved observation represents a reusable mixture.
-                for row in conn.execute("""SELECT json_extract(after_state,'$.containers') FROM events
-                        WHERE id > ? AND action IN ('create','wells','activity','transfer','relocate','lab_record_save')
-                        AND id NOT IN (SELECT target_event_id FROM reversals) ORDER BY id""", (cursor,)):
-                    remember(json.loads(row[0]))
+            # Completed observations include the full recipe, even if the submitted
+            # patch only changed one component. Rebuild from surviving events on undo.
+            for row in conn.execute("""SELECT json_extract(after_state,'$.containers') FROM events
+                    WHERE id > ? AND action IN ('create','wells','activity','transfer','relocate','lab_record_save')
+                    AND id NOT IN (SELECT target_event_id FROM reversals) ORDER BY id""", (cursor,)):
+                remember(json.loads(row[0]))
+            if rebuild:
                 current = conn.execute("SELECT json_extract(body,'$.containers') FROM current_state").fetchone()
                 remember(json.loads(current[0]))
-                self._recipe_cache = history
-                self._recipe_cursor, self._recipe_last_undo = newest, last_undo
-            return recipe_catalogue(reversed(self._recipe_cache.values()))
+            if rebuild or len(history) != len(self._recipe_cache):
+                self._recipe_result = recipe_catalogue(reversed(history.values()))
+            self._recipe_cache, self._recipe_raw_seen = history, seen
+            self._recipe_cursor, self._recipe_last_undo = newest, last_undo
+            return deepcopy(self._recipe_result)
 
     def medium_history(self):
         history={'bases':[],'cytokines':[],'additives':[],'additive_entries':[]};seen={key:set() for key in history}
@@ -778,25 +790,60 @@ class Store:
             entry=event_entry(conn,row)
             return {'event_id':row['id'],'action':row['action'],'title':entry['title'],'at':row['at'],'containers':entry['containers'],'summary':entry['summary']}
 
+    def _event_entries(self, conn, max_revision):
+        """Project append-only events once. Caller holds lock and a read transaction."""
+        from workday import event_entry
+        count, newest = conn.execute(
+            'SELECT (SELECT COUNT(*) FROM events), COALESCE(MAX(id), 0) FROM events'
+        ).fetchone()
+        cursor = self._event_cursor
+        if newest < cursor or count != len(self._event_cache) + newest - cursor:
+            self._event_cache.clear()
+            cursor = 0
+        if newest > cursor:
+            additions = {}
+            for row in conn.execute("""SELECT id, at, action, payload,
+                       json_extract(after_state, '$.revision') AS revision
+                       FROM events WHERE id > ? ORDER BY id""", (cursor,)):
+                additions[row['id']] = (row['revision'], event_entry(conn, row))
+            self._event_cache.update(additions)
+        self._event_cursor = newest
+
+        undone = {}
+        for row in conn.execute('SELECT target_event_id, undo_event_id, at FROM reversals'):
+            undo_event = self._event_cache.get(row['undo_event_id'])
+            if max_revision is None or undo_event is None or undo_event[0] <= max_revision:
+                undone[row['target_event_id']] = row['at']
+        entries = []
+        for event_id in reversed(self._event_cache):
+            revision, entry = self._event_cache[event_id]
+            if max_revision is None or revision <= max_revision:
+                entries.append({**entry, 'undone': event_id in undone, 'undone_at': undone.get(event_id)})
+        return entries
+
     def workday(self,now=None):
         from workday import build_workday
-        with self.connect() as conn:
+        with self.lock, self.connect() as conn:
             conn.execute('BEGIN')
             state=json.loads(conn.execute('SELECT body FROM current_state').fetchone()[0])
-            return build_workday(conn,state,now or current_time())
+            entries = self._event_entries(conn, state['revision'])
+            return build_workday(conn, state, now or current_time(), entries)
 
     def activities(self,container_id=None,day=None,max_revision=None):
-        from workday import event_rows,event_entry
-        with self.connect() as conn:
-            rows = list(event_rows(conn,max_revision))
-            state = json.loads(rows[0]['after_state']) if max_revision is not None and rows else json.loads(conn.execute('SELECT body FROM current_state').fetchone()[0])
+        with self.lock, self.connect() as conn:
+            conn.execute('BEGIN')
+            entries = self._event_entries(conn, max_revision)
+            if max_revision is not None and entries:
+                state = json.loads(conn.execute('SELECT after_state FROM events WHERE id=?',
+                                                (entries[0]['event_id'],)).fetchone()[0])
+            else:
+                state = json.loads(conn.execute('SELECT body FROM current_state').fetchone()[0])
             group = get_display_group(state, container_id)
             related_ids = {container_id, *(group['container_ids'] if group else [])}
-            entries=[event_entry(conn,row) for row in rows]
         entries=[e for e in entries if (e['is_operation'] or e['action'] in ['check','confirm'])
                  and (not container_id or related_ids.intersection(e['container_ids'])) and (not day or e['occurred_at'][:10]==day)]
         entries.sort(key=lambda e:(e['occurred_at'],e['event_id']),reverse=True)
-        return entries[:200] if day is None else entries
+        return deepcopy(entries[:200] if day is None else entries)
 
     def backup(self):
         directory = self.directory / 'backups'

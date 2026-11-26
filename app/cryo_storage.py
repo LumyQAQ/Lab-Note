@@ -1,4 +1,5 @@
 """Customizable cryo-storage topology, slot mapping, correlation and contamination risk."""
+from copy import deepcopy
 from datetime import datetime
 import re
 import uuid
@@ -9,7 +10,6 @@ from platform_config import TZ
 DEVICE_KINDS = ('ln2', 'minus80', 'custom')
 NUMBERING_MODES = ('alpha', 'numeric')
 STORAGE_STAGES = ('gradient', 'stored', 'unassigned')
-CELL_KINDS = ('', '细胞系', '原代细胞')
 
 
 def ensure_cryo_storage(state):
@@ -30,27 +30,27 @@ def box_slot_keys(rows, cols, numbering='alpha'):
     return [f'{chr(65 + r)}{c + 1}' for r in range(rows) for c in range(cols)]
 
 
-def normalize_special_treatments(value):
+def normalize_tags(value, label, limit):
     if value is None or value == '':
         return []
     if isinstance(value, str):
         raw = [part.strip() for part in re.split(r'[,，、;；\n]', value) if part.strip()]
     elif isinstance(value, list):
         if any(not isinstance(item, str) for item in value):
-            raise ValueError('特殊处理标签须为文本列表')
+            raise ValueError(f'{label}须为文本列表')
         raw = [item.strip() for item in value if item.strip()]
     else:
-        raise ValueError('特殊处理标签格式无效')
+        raise ValueError(f'{label}格式无效')
     result, seen = [], set()
     for item in raw:
-        if len(item) > 80:
-            raise ValueError('单项特殊处理标签不能超过 80 字')
+        if len(item) > limit:
+            raise ValueError(f'单项{label}不能超过 {limit} 字')
         key = item.casefold()
         if key not in seen:
             seen.add(key)
             result.append(item)
     if len(result) > 20:
-        raise ValueError('单个批次最多记录 20 项特殊处理标签')
+        raise ValueError(f'单个批次最多记录 20 项{label}')
     return result
 
 
@@ -83,10 +83,10 @@ def format_per_vial_count(value):
 
 def normalize_optional_fields(payload, *, existing=None):
     base = existing or {}
-    cell_kind = payload['cell_kind'] if 'cell_kind' in payload else (base.get('cell_kind') or '')
-    if not isinstance(cell_kind, str) or cell_kind not in CELL_KINDS:
-        raise ValueError('细胞类型须为细胞系、原代细胞或留空')
-    special_treatments = (normalize_special_treatments(payload['special_treatments'])
+    cell_kind = text(payload['cell_kind'], '细胞类型', 80) if 'cell_kind' in payload else (base.get('cell_kind') or '')
+    resistance_tags = (normalize_tags(payload['resistance_tags'], '抗性标签', 60)
+                       if 'resistance_tags' in payload else list(base.get('resistance_tags') or []))
+    special_treatments = (normalize_tags(payload['special_treatments'], '特殊处理标签', 80)
                           if 'special_treatments' in payload
                           else list(base.get('special_treatments') or []))
     passage = text(payload['passage'], '细胞代次', 60) if 'passage' in payload else (base.get('passage') or '')
@@ -105,6 +105,7 @@ def normalize_optional_fields(payload, *, existing=None):
             raise ValueError('请填写有效的原始激活日期') from None
     return {
         'cell_kind': cell_kind,
+        'resistance_tags': resistance_tags,
         'special_treatments': special_treatments,
         'passage': passage,
         'donor': donor,
@@ -527,15 +528,27 @@ def apply_cryo_stock_create(state, payload, now):
     meta = normalize_optional_fields(payload)
     labels = text(payload.get('labels', ''), '冻存管编号', 1000)
     manual_location = text(payload.get('location', ''), '存放位置', 500)
-    per_vial_text = text(payload.get('per_vial', ''), '每管细胞数', 120) or format_per_vial_count(meta['per_vial_count'])
+    per_vial_text = format_per_vial_count(meta['per_vial_count']) or text(payload.get('per_vial', ''), '每管细胞数', 120)
     notes = text(payload.get('notes', ''), '冻存备注', 5000)
+    source_lot_id = text(payload.get('source_lot_id', ''), '来源冻存批次', 120)
+    if source_lot_id:
+        if payload.get('source') is not None:
+            raise ValueError('请选择一种培养来源')
+        original = next((b for b in state.get('frozen_batches', []) if b['id'] == source_lot_id), None)
+        if original is None:
+            raise ValueError('来源冻存批次不存在')
+        sources = deepcopy(original.get('sources') or [])
+        refs = deepcopy(original.get('experiment_refs') or [])
+    else:
+        sources = _stock_source(state, payload.get('source'))
+        refs = []
     lot = {
         'id': 'FRZ-' + uuid.uuid4().hex[:16].upper(),
         'name': name,
         'at': at,
         'vials': vials,
-        'sources': _stock_source(state, payload.get('source')),
-        'experiment_refs': [],
+        'sources': sources,
+        'experiment_refs': refs,
         'recorded_at': now,
         'labels': labels,
         'location': manual_location,
@@ -642,11 +655,35 @@ def apply_cryo_batch_update(state, payload, now):
     lot = next((b for b in state.get('frozen_batches', []) if b['id'] == lot_id), None)
     if not lot:
         raise ValueError('冻存批次不存在')
+
+    # Validate optional split_slots (edit only selected slot(s) of a multi-vial batch as an independent lot)
+    split_targets = []
+    if 'split_slots' in payload:
+        raw_split = payload['split_slots']
+        if not isinstance(raw_split, list) or not raw_split:
+            raise ValueError('请选择至少一个要单独修改的格位')
+        seen_split = set()
+        for spec in raw_split:
+            if not isinstance(spec, dict):
+                raise ValueError('待拆分格位格式无效')
+            bid = text(spec.get('box_id', ''), '冻存盒编号', 120)
+            skey = text(spec.get('slot', ''), '格位坐标', 20)
+            box = _find_box(storage, bid)
+            if not box or skey not in box.get('slots', {}) or box['slots'][skey].get('batch_id') != lot_id:
+                raise ValueError(f'格位 {skey} 不属于本批次或为空')
+            if (bid, skey) in seen_split:
+                raise ValueError('待拆分格位存在重复')
+            seen_split.add((bid, skey))
+            split_targets.append((box, skey))
+    do_split = bool(split_targets) and len(split_targets) < lot['vials']
+
+    # Validate all field updates before mutating state
+    updates = {}
     if 'name' in payload:
         name = text(payload.get('name', ''), '细胞名称', 200)
         if not name:
             raise ValueError('细胞名称不能为空')
-        lot['name'] = name
+        updates['name'] = name
     if 'at' in payload:
         at = text(payload.get('at', ''), '冻存时间', 40)
         if len(at) == 10 and re.fullmatch(r'\d{4}-\d{2}-\d{2}', at):
@@ -657,37 +694,77 @@ def apply_cryo_batch_update(state, payload, now):
             raise ValueError('请填写有效的冻存时间') from None
         if len(at) < 16 or at[10] != 'T' or stamp.tzinfo is not None or stamp.replace(tzinfo=TZ) > datetime.fromisoformat(now):
             raise ValueError('冻存时间须为已发生的北京时间')
-        if any(at > w['at'] for w in batch_withdrawals(state, lot_id)):
+        if not do_split and any(at > w['at'] for w in batch_withdrawals(state, lot_id)):
             raise ValueError('冻存时间不能晚于已有出库记录')
-        lot['at'] = at
+        updates['at'] = at
     meta = normalize_optional_fields(payload, existing=lot)
-    lot.update(meta)
+    updates.update(meta)
     if 'per_vial_count' in payload:
-        lot['per_vial'] = format_per_vial_count(meta['per_vial_count']) or text(payload.get('per_vial', ''), '每管细胞数', 120)
+        updates['per_vial'] = format_per_vial_count(meta['per_vial_count']) or text(payload.get('per_vial', ''), '每管细胞数', 120)
     elif 'per_vial' in payload:
-        lot['per_vial'] = text(payload.get('per_vial', ''), '每管细胞数', 120)
+        updates['per_vial'] = text(payload.get('per_vial', ''), '每管细胞数', 120)
     if 'labels' in payload:
-        lot['labels'] = text(payload.get('labels', ''), '冻存管编号', 1000)
+        updates['labels'] = text(payload.get('labels', ''), '冻存管编号', 1000)
     if 'notes' in payload:
-        lot['notes'] = text(payload.get('notes', ''), '冻存备注', 5000)
+        updates['notes'] = text(payload.get('notes', ''), '冻存备注', 5000)
     if 'manual_location' in payload:
-        lot['manual_location'] = text(payload.get('manual_location', ''), '存放位置', 500)
+        updates['manual_location'] = text(payload.get('manual_location', ''), '存放位置', 500)
+
+    next_stage = None
     if 'storage_stage' in payload:
+        if do_split:
+            raise ValueError('已落位的拆分格位不能切换暂存状态')
         next_stage = payload['storage_stage']
         if next_stage not in ('gradient', 'unassigned'):
             raise ValueError('仅支持在暂存盒暂存与未定位之间切换')
         if batch_unplaced(state, lot) <= 0:
             raise ValueError('该批次全部冻存管已落位或取出，无需切换暂存状态')
-        lot['storage_stage'] = next_stage
-        if next_stage == 'gradient':
-            lot['gradient_entered_at'] = lot.get('gradient_entered_at') or now[:16]
-    if 'slot_update' in payload and isinstance(payload['slot_update'], dict):
+
+    slot_update_target = None
+    if 'slot_update' in payload:
         su = payload['slot_update']
+        if not isinstance(su, dict):
+            raise ValueError('单管编号更新格式无效')
         box = _find_box(storage, text(su.get('box_id', ''), '冻存盒编号', 120))
         skey = text(su.get('slot', ''), '格位坐标', 20)
         if not box or skey not in box.get('slots', {}) or box['slots'][skey].get('batch_id') != lot_id:
             raise ValueError('找不到对应冻存格位')
-        box['slots'][skey]['vial_label'] = text(su.get('vial_label', ''), '单管编号', 120)
+        if split_targets and (box['id'], skey) not in seen_split:
+            raise ValueError('单管编号对应的格位不在本次拆分范围内')
+        slot_update_target = (box, skey, text(su.get('vial_label', ''), '单管编号', 120))
+
+    if slot_update_target:
+        box, skey, vlabel = slot_update_target
+        box['slots'][skey]['vial_label'] = vlabel
+
+    if do_split:
+        new_lot = deepcopy(lot)
+        new_lot['id'] = 'FRZ-' + uuid.uuid4().hex[:16].upper()
+        new_lot['vials'] = len(split_targets)
+        new_lot['storage_stage'] = 'stored'
+        new_lot['recorded_at'] = now
+        new_lot['split_from_lot_id'] = lot_id
+        new_lot.pop('gradient_entered_at', None)
+        new_lot.update(updates)
+        lot['vials'] -= len(split_targets)
+        for box, skey in split_targets:
+            box['slots'][skey]['batch_id'] = new_lot['id']
+        state.setdefault('frozen_batches', []).append(new_lot)
+        refresh_batch_location(state, lot)
+        refresh_batch_location(state, new_lot)
+        return {
+            'lot_id': new_lot['id'],
+            'split_from_lot_id': lot_id,
+            'split_count': len(split_targets),
+            'name': new_lot['name'],
+            'storage_stage': 'stored',
+        }
+
+    lot.update(updates)
+    if next_stage is not None:
+        lot['storage_stage'] = next_stage
+        if next_stage == 'gradient':
+            lot['gradient_entered_at'] = lot.get('gradient_entered_at') or now[:16]
     refresh_batch_location(state, lot)
     return {'lot_id': lot_id, 'name': lot['name'], 'storage_stage': lot.get('storage_stage', 'unassigned')}
 

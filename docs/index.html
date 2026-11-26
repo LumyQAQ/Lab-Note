@@ -9,7 +9,7 @@
 <main id="main">
 <section class="intro"><div class="wrap hero">
 <div class="intro-copy" data-enter><p class="kicker">个人实验笔记</p><h1 lang="en">Lab Note<span aria-hidden="true">.</span></h1><p class="lead">从一个培养孔，查到它的来源、每天的观察和后续实验。</p>
-<div class="hero-actions"><a class="button" href="https://github.com/LumyQAQ/Lab-Note/releases/download/v1.3.0-preview.1/Lab-Note-1.3.0-preview.1-Windows-x64.zip">Windows x64 预览版 <span aria-hidden="true">↓</span></a><a class="button secondary-download" href="downloads/lab-note-v1.3.0.zip" download>macOS 正式版 <span aria-hidden="true">↓</span></a></div>
+<div class="hero-actions"><a class="button" href="https://github.com/LumyQAQ/Lab-Note/releases/download/v1.4.0-preview.1/Lab-Note-1.4.0-preview.1-Windows-x64.zip">Windows x64 预览版 <span aria-hidden="true">↓</span></a><a class="button secondary-download" href="downloads/lab-note-v1.4.0.zip" download>macOS 正式版 <span aria-hidden="true">↓</span></a></div>
 <p class="platforms"><a href="#install">安装与启动说明</a> <b>·</b> 软件作者 <a rel="author noopener" href="https://github.com/LumyQAQ" target="_blank">LumyQAQ</a></p>
 </div>
 <div class="demo" id="plate-demo" aria-label="空白孔板模板" data-enter>
@@ -26,17 +26,17 @@
 </div></section>
 <section class="install" id="install"><div class="wrap install-inner"><div><p class="kicker">本机运行</p><h2>选择你的<br>操作系统。</h2><p class="install-lead">首次启动是空白工作台。培养记录、实验日记和备份保存在自己的电脑上。</p><a class="install-link" href="verification.html">校验下载包与作者签名 ↗</a></div>
 <div class="platform-guides">
-<p>新增冻存库存，可按设备、架、盒和格位查找冻存管，记录入库、移动、出库及污染标记。培养总览支持直接补液，配方可按基础培养基筛选。跨规格孔板可按原相对位置分板，保存时支持重复请求去重和多窗口冲突提示。</p>
-<details open><summary>Windows x64 <span>1.3.0-preview.1</span></summary>
+<p>冻存库存支持复制到空格位，或只编辑选中的单管。可输入自定义细胞类别，分项记录处理与抗性标签，并查看与来源孔关联的实验。复制后内容相同的管保持同色。操作历史和配方查询复用缓存，减少保存时的重复读取。</p>
+<details open><summary>Windows x64 <span>1.4.0-preview.1</span></summary>
 <p>适用于 Windows 10 / 11 的 Intel、AMD 64 位电脑，包内已附 Python。</p>
-<ol><li>下载 <a href="https://github.com/LumyQAQ/Lab-Note/releases/download/v1.3.0-preview.1/Lab-Note-1.3.0-preview.1-Windows-x64.zip">Windows 预览版 ZIP</a>，右键选「全部解压」。</li><li>进入 Lab-Note 文件夹，双击 <code>Start-Lab-Note.cmd</code>，默认浏览器会打开工作台。</li></ol>
+<ol><li>下载 <a href="https://github.com/LumyQAQ/Lab-Note/releases/download/v1.4.0-preview.1/Lab-Note-1.4.0-preview.1-Windows-x64.zip">Windows 预览版 ZIP</a>，右键选「全部解压」。</li><li>进入 Lab-Note 文件夹，双击 <code>Start-Lab-Note.cmd</code>，默认浏览器会打开工作台。</li></ol>
 <p>默认优先使用 8875，占用时自动选择空闲端口。在解压目录的 PowerShell 中可执行：</p>
 <pre><code>.\Start-Lab-Note.cmd -h
 .\Start-Lab-Note.cmd --status
 .\Start-Lab-Note.cmd --port 8890</code></pre>
 <p>切换运行中的端口前，先执行 <code>.\Stop-Lab-Note.cmd</code>。数据和日志默认保存在 <code>%LOCALAPPDATA%\Lab Note</code>。双击 <code>Check-Lab-Note.cmd</code> 可用临时库自检。</p>
-<a class="install-link" href="https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.3.0-preview.1">查看 Windows 版本说明 ↗</a></details>
-<details><summary>macOS <span>1.3.0</span></summary><p>安装 Python 3.9 或更新版本，下载并解压 <a href="downloads/lab-note-v1.3.0.zip" download>macOS 正式版 ZIP</a>，双击「启动实验日记.command」。也可从解压目录执行：</p><pre><code>python3 app/launch.py</code></pre><p>启动器优先使用 8875，端口被占用时会选择空闲端口。</p></details></div>
+<a class="install-link" href="https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.4.0-preview.1">查看 Windows 版本说明 ↗</a></details>
+<details><summary>macOS <span>1.4.0</span></summary><p>安装 Python 3.9 或更新版本，下载并解压 <a href="downloads/lab-note-v1.4.0.zip" download>macOS 正式版 ZIP</a>，双击「启动实验日记.command」。也可从解压目录执行：</p><pre><code>python3 app/launch.py</code></pre><p>启动器优先使用 8875，端口被占用时会选择空闲端口。</p></details></div>
 </div></section></main>
 <footer><div class="wrap footer"><a href="verification.html">验证下载包</a><span>Lab Note · 软件作者 <a rel="author noopener" href="https://github.com/LumyQAQ" target="_blank">LumyQAQ</a></span><a href="#main">回到顶部 ↑</a></div></footer>
 </body></html>

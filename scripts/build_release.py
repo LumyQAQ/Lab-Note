@@ -78,7 +78,7 @@ tests/test_public_app.py
 
 
 def main():
-    target = ROOT / 'docs/downloads/lab-note-v1.3.0.zip'
+    target = ROOT / 'docs/downloads/lab-note-v1.4.0.zip'
     target.parent.mkdir(parents=True, exist_ok=True)
     pending = target.with_suffix('.tmp')
     with zipfile.ZipFile(pending, 'w', compression=zipfile.ZIP_DEFLATED) as archive:

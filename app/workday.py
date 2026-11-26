@@ -99,7 +99,12 @@ def event_entry(conn,row,cache=None):
     before=after=None;post_endings=None
     def states():
         nonlocal before,after
-        if before is None:before=json.loads(row['before_state']);after=json.loads(row['after_state'])
+        if before is None:
+            snapshots = row if 'before_state' in row else conn.execute(
+                'SELECT before_state,after_state FROM events WHERE id=?', (row['id'],)
+            ).fetchone()
+            before = json.loads(snapshots['before_state'])
+            after = json.loads(snapshots['after_state'])
         return before,after
     def names(ids):
         b,a=states();lookup={c['id']:c['name'] for c in b['containers']+a['containers']}
@@ -145,6 +150,9 @@ def event_entry(conn,row,cache=None):
     elif action=='cryo_batch_update':
         title='修改冻存信息'
         summary=p.get('name','')
+        if p.get('split_from_lot_id'):
+            title='拆分冻存批次并修改信息'
+            summary += f" · 拆分 {p['split_count']} 管 · {p['split_from_lot_id']} → {p['lot_id']}"
     elif action=='cryo_mark_contamination':
         title='撤销冻存复苏污染标记' if p.get('cleared') else '标记复苏后细胞污染';operation=True
         occurred=p.get('at') or occurred
@@ -258,19 +266,23 @@ def event_entry(conn,row,cache=None):
 
 
 def event_rows(conn,max_revision=None):
-    rows=conn.execute('''SELECT e.*,r.at AS undone_at,u.after_state AS undo_state FROM events e
-        LEFT JOIN reversals r ON r.target_event_id=e.id LEFT JOIN events u ON u.id=r.undo_event_id ORDER BY e.id DESC''')
+    rows=conn.execute("""SELECT e.id,e.at,e.action,e.payload,
+        json_extract(e.after_state,'$.revision') AS revision,
+        r.at AS undone_at, json_extract(u.after_state,'$.revision') AS undo_revision
+        FROM events e LEFT JOIN reversals r ON r.target_event_id=e.id
+        LEFT JOIN events u ON u.id=r.undo_event_id ORDER BY e.id DESC""")
     for row in rows:
         row=dict(row)
         if max_revision is not None:
-            if json.loads(row['after_state'])['revision']>max_revision:continue
-            if row['undo_state'] and json.loads(row['undo_state'])['revision']>max_revision:row['undone_at']=None
+            if row['revision'] > max_revision:continue
+            if row['undo_revision'] is not None and row['undo_revision'] > max_revision:row['undone_at']=None
         yield row
 
 
-def build_workday(conn,state,now):
+def build_workday(conn,state,now,entries=None):
     day=now.astimezone(TZ).date().isoformat()
-    entries=[event_entry(conn,row) for row in event_rows(conn,state['revision'])]
+    if entries is None:
+        entries=[event_entry(conn,row) for row in event_rows(conn,state['revision'])]
     entries=[e for e in entries if e['occurred_at'][:10]==day]
     entries.sort(key=lambda e:(e['occurred_at'],e['event_id']),reverse=True)
     rows=[]
@@ -287,11 +299,11 @@ def build_workday(conn,state,now):
                      'last_activity':related[0]['occurred_at'] if related else None,
                      'active_treatment_count':sum(len(w.get('active_treatments',[])) for w in active_members)})
     active=[c for c in rows if c['status']=='active']
-    snapshot=conn.execute('SELECT id,date,at,verified,state FROM snapshots WHERE date=? ORDER BY at DESC LIMIT 1',(day,)).fetchone()
+    snapshot=conn.execute("SELECT id,date,at,verified,json_extract(state,'$.revision') AS revision FROM snapshots WHERE date=? ORDER BY at DESC LIMIT 1",(day,)).fetchone()
     if snapshot:
-        snapshot=dict(snapshot);snapshot['revision']=json.loads(snapshot.pop('state'))['revision'];snapshot['up_to_date']=snapshot['revision']==state['revision']
+        snapshot=dict(snapshot);snapshot['up_to_date']=snapshot['revision']==state['revision']
     baseline=conn.execute('SELECT id,date,at FROM snapshots WHERE date<? ORDER BY date DESC,at DESC LIMIT 1',(day,)).fetchone()
     return {'date':day,'revision':state['revision'],'counts':{'active':len(active),'pending':sum(not c['checked'] for c in active),
             'checked':sum(c['checked'] for c in active),'operations':sum(e['is_operation'] and not e['undone'] for e in entries),
             'edits':sum(not e['is_operation'] and not e['undone'] and e['action'] not in ['check','confirm','undo'] for e in entries)},
-            'containers':rows,'timeline':entries[:200],'snapshot':snapshot,'baseline':dict(baseline) if baseline else None}
+            'containers':rows,'timeline':deepcopy(entries[:200]),'snapshot':snapshot,'baseline':dict(baseline) if baseline else None}

@@ -2,6 +2,7 @@
 from copy import deepcopy
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from functools import lru_cache
 from pathlib import Path
 from platform_config import TZ
 import json
@@ -18,6 +19,7 @@ def current_time():
     return datetime.now(TZ)
 
 
+@lru_cache(maxsize=1)
 def load_schema():
     return json.loads(Path(__file__).with_name('lab_schemas.json').read_text(encoding='utf-8'))
 
