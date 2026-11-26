@@ -8,7 +8,7 @@ import zipfile
 
 ROOT=Path(__file__).resolve().parents[1]
 RUNTIME_SHA256='90905e64a840557d8c1bc4f5b74db3d7ee85e3ffb217611cac1c7813acea4159'
-NAME='Lab-Note-1.2.1-preview.1-Windows-x64.zip'
+NAME='Lab-Note-1.3.0-preview.1-Windows-x64.zip'
 
 
 def build(runtime_path,out):

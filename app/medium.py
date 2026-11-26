@@ -1,4 +1,5 @@
 """Structured culture-medium records; no protocol or unit inference."""
+import re
 from copy import deepcopy
 from decimal import Decimal, InvalidOperation
 
@@ -98,3 +99,25 @@ def saved_media(containers):
             yield well.get('medium')
             for part in well.get('components', []):
                 yield part.get('source_medium') or part.get('medium')
+
+
+_BASE_ALIASES = {'rpmi1640': 'RPMI 1640', 'dmem': 'DMEM', 'mem': 'MEM', 'dmem/f12': 'DMEM/F12'}
+
+
+def recipe_catalogue(recipes):
+    """Return equivalent suggestions once, preserving the original observations."""
+    result = {}
+    for recipe in recipes:
+        candidate = deepcopy(recipe)
+        base = candidate['base'].strip()
+        candidate['base'] = _BASE_ALIASES.get(re.sub(r'[\s-]+', '', base).casefold(), base)
+        comparable = deepcopy(candidate)
+        if not comparable['additives'] and comparable['extra'] == 'unknown':
+            comparable['extra'] = 'no'
+        for item in comparable['cytokines'] + comparable['additives']:
+            item['unit'] = item['unit'].strip().replace('µ', 'μ')
+        key = recipe_key(comparable)
+        existing = result.get(key)
+        if existing is None or (candidate['extra'] == 'no' and existing['extra'] == 'unknown'):
+            result[key] = candidate
+    return list(result.values())

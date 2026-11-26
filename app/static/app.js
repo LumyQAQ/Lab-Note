@@ -18,13 +18,74 @@ function toast(text, error = false) {
   $('#toast').textContent = text; $('#toast').className = 'toast' + (error ? ' error' : ''); $('#toast').hidden = false;
   clearTimeout(toast.timer); toast.timer = setTimeout(() => { $('#toast').hidden = true; }, error ? 9000 : 4000);
 }
-async function api(path, body) {
+async function requestJson(path, body) {
   const options = body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json','X-Lab-Token':boot.token}, body:JSON.stringify(body)};
   const response = await fetch(path, options);
   const result = await response.json();
   if (!response.ok) {
-    const error=new Error(result.error || '操作失败');error.status=response.status;throw error;
+    const error = new Error(result.error || '操作失败');
+    error.status = response.status;
+    error.conflict = result.conflict;
+    throw error;
   }
+  return result;
+}
+
+const uncertainCommands = new Map();
+async function submitCommand(body) {
+  const key = JSON.stringify(body);
+  const requestId = body.client_request_id || uncertainCommands.get(key) || crypto.randomUUID();
+  const submission = {...body, client_request_id:requestId};
+  let transportRetried = false;
+  // Keep the same request ID after a lost response, including a later manual retry.
+  uncertainCommands.set(key, requestId);
+  for (;;) {
+    try {
+      const result = await requestJson('/api/command', submission);
+      uncertainCommands.delete(key);
+      return result;
+    } catch (error) {
+      if (!error.status || error.status >= 500) {
+        if (!transportRetried) {
+          transportRetried = true;
+          continue;
+        }
+        let status, fresh;
+        try {
+          status = await requestJson('/api/command-status?request_id='+encodeURIComponent(requestId));
+          if (status.committed) fresh = await requestJson('/api/state');
+        } catch { /* Keep the request ID while the local service is unreachable. */ }
+        if (fresh) {
+          uncertainCommands.delete(key);
+          const {cell_names, treatments, medium_history, count_history} = fresh;
+          return {...fresh, histories:{cell_names, treatments, medium_history, count_history}};
+        }
+        if (status?.undone) {
+          uncertainCommands.delete(key);
+          throw new Error('刚才的提交已被撤销。请刷新后核对当前记录。');
+        }
+        throw new Error('未能核实保存结果。连接恢复后可在当前页面重新提交相同内容，已保存的操作只会记录一次。');
+      }
+      const conflict = error.conflict;
+      if (error.status === 409 && conflict?.level === 'unrelated' &&
+          Number.isInteger(conflict.current_revision) && conflict.current_revision > submission.revision &&
+          confirm('另一窗口更新了其他记录。本次涉及的记录没有变化。同步并保存当前填写的内容？')) {
+        // Submit the exact version the server checked. A newer change must be diagnosed again.
+        submission.revision = conflict.current_revision;
+        continue;
+      }
+      uncertainCommands.delete(key);
+      if (error.status === 409 && conflict?.level === 'scope_changed') {
+        const changed = [...conflict.changed_containers, ...conflict.changed_records].join('、');
+        error.message = '本次涉及的记录已在另一窗口更新' + (changed ? '（'+changed+'）' : '') + '。请刷新核对后再保存。';
+      }
+      throw error;
+    }
+  }
+}
+
+async function api(path, body) {
+  const result = path === '/api/command' ? await submitCommand(body) : await requestJson(path, body);
   if(path==='/api/command'&&boot){
     if(Object.prototype.hasOwnProperty.call(result,'undo'))boot.undo=result.undo;
     if(result.workday)boot.workday=result.workday;
@@ -51,7 +112,7 @@ function componentSummary(well,recordDate=frozen?.date||boot.today){
   const parts=well.components||[well];
   return `<div class="component-records">${parts.map(p=>`<div><strong>${esc(p.cell)}</strong> · ${esc(p.kind)}<p class="muted">${esc(p.role||'')} ${p.amount?' · '+esc(p.amount):''}${p.aliquot_id?'<br>混合来源整份：'+esc(p.aliquot_role||'混合样本')+' · '+esc(p.aliquot_amount||'未填写加入量')+'（非单组分量）':''}<br>批次：${esc(p.batch||'—')} · Day ${dayOf(p,recordDate)}<br>${esc(p.anchor)}：${esc(p.day0)}${p.origin?'<br>来源：'+esc(p.origin.pool_id?'整体收集：'+(p.origin.sources||[]).map(s=>(s.name||s.id)+' / '+s.well).join('、'):(p.origin.name||p.origin.id||'来源')+' / '+(p.origin.well||'')):''}</p></div>`).join('')}</div>${well.experiment_started_at?`<p class="muted">实验开始：${esc(well.experiment_started_at.replace('T',' '))}</p>`:''}`;
 }
-function modalOpen(){return $('#archive-culture-dialog')?.open||$('#create-dialog').open||$('#transfer-dialog').open||$('#transfer-system-dialog').open||$('#transfer-review-dialog').open||$('#occupied-target-dialog').open||$('#lineage-dialog').open||$('#edit-container-dialog').open||$('#manual-group-dialog').open||$('#well-group-dialog')?.open||$('#relocation-dialog').open||$('#activity-dialog').open||$('#quick-medium-dialog').open||$('#journal-dialog').open||$('#undo-dialog').open||$('#lab-record-dialog').open;}
+function modalOpen(){return $('#cryo-dialog').open||$('#archive-culture-dialog')?.open||$('#create-dialog').open||$('#transfer-dialog').open||$('#transfer-system-dialog').open||$('#transfer-review-dialog').open||$('#occupied-target-dialog').open||$('#lineage-dialog').open||$('#edit-container-dialog').open||$('#manual-group-dialog').open||$('#well-group-dialog')?.open||$('#relocation-dialog').open||$('#activity-dialog').open||$('#quick-medium-dialog').open||$('#journal-dialog').open||$('#undo-dialog').open||$('#lab-record-dialog').open;}
 function activeContainers() { return displayContainers().filter(c => c.status === 'active'); }
 function wellList(container) { return Object.values(container.wells).filter(w => (container.status==='archived'||frozen)?!!w.cell:memberActive(w)); }
 function activeState() { return frozen ? frozen.state : state; }
@@ -96,6 +157,7 @@ function render() {
   document.querySelectorAll('.nav').forEach(b => b.classList.toggle('active', b.dataset.view === view));
   renderUndoControl();
   if(view==='home')renderHome();
+  else if(view==='cryo')renderCryoWorkspace();
   else if(view==='work')renderWorkday();
   else if(view==='labs')renderExperiments();
   else if(view==='drugs')renderDrugs();
@@ -125,7 +187,7 @@ function experimentSelection(c,id){
   const active=c?.status==='active'?keys.filter(k=>memberActive(c.wells[k])):[];return active.length?active:keys;
 }
 function renderToday() {
-  $('#content').innerHTML = todayStats() + `<div class="section-head"><div><h2>今天的培养</h2><span class="muted">记录每一个容器，也照顾每一个孔位。</span></div><div class="actions"><button class="button secondary" id="merge-cultures">手动合并培养组</button><button class="button secondary" id="save-snapshot">保存快照</button><button class="button secondary" id="confirm-day" ${!activeContainers().length?'disabled':''}>✓ 全部核对并保存快照</button><button class="button primary" id="add-container">＋ 新增容器</button></div></div><div class="notice"><span><strong>22:00 · 每日留档</strong>　自动保存已录入状态；未核对的记录会保留标记。<br><span class="muted">实际操作发生后填写。服务暂停期间不会补造细胞状态，恢复后可在当天补存。</span></span><button class="text-button" id="go-history">查看历史日记 ↗</button></div>${experimentFilter?`<div class="notice">关联实验：${esc(experimentFilter)} · 已定位相关容器和孔位<button class="text-button" id="clear-experiment-filter">显示全部培养</button></div>`:''}<div id="cultures"></div>`;
+  $('#content').innerHTML = `<div class="today-top-compact">${todayStats()}<div class="section-head"><div><h2>今天的培养</h2><span class="muted">22:00 自动留档 · 实际操作发生后填写；未核对记录保留标记。<button class="text-button" id="go-history">历史日记 ↗</button></span></div><div class="actions"><button class="button secondary" id="merge-cultures">手动合并培养组</button><button class="button secondary" id="save-snapshot">保存快照</button><button class="button secondary" id="confirm-day" ${!activeContainers().length?'disabled':''}>✓ 全部核对并保存快照</button><button class="button primary" id="add-container">＋ 新增容器</button></div></div></div>${experimentFilter?`<div class="notice">关联实验：${esc(experimentFilter)} · 已定位相关容器和孔位<button class="text-button" id="clear-experiment-filter">显示全部培养</button></div>`:''}<div id="cultures"></div>`;
   if($('#clear-experiment-filter'))$('#clear-experiment-filter').onclick=()=>{if(!canLeave())return;dirty=false;experimentFilter='';selected.clear();renderToday();};
   $('#add-container').onclick = showCreate;
   $('#merge-cultures').onclick = () => openManualGroup();
@@ -133,6 +195,15 @@ function renderToday() {
   $('#save-snapshot').onclick = () => saveSnapshot(false);
   $('#confirm-day').onclick = () => saveSnapshot(true);
   renderCultures();
+}
+function filterCulturesList(all) {
+  return sortCulturesByCheck(all.filter(c => (!experimentFilter||Object.values(c.wells).some(w=>w.cell&&w.experiment===experimentFilter)) && (statusFilter === 'all' || c.status === statusFilter) && [c.name,c.id,...Object.values(c.display_members||{}).flatMap(m=>[m.container_name,m.container_id]),...wellList(c).map(w => w.cell)].join(' ').toLowerCase().includes(search.toLowerCase())));
+}
+function containerCardsMarkup(list) {
+  return list.map(c => {
+    const wells = wellList(c), days = [...new Set(wells.map(wellDayLabel))];
+    return `<div class="container-card-wrap"><button class="container-card ${c.id===currentId?'selected':''}" data-container="${esc(c.id)}"><div class="card-top">${typeBadge(c)}<span class="pill ${c.checked_date===(frozen?.date||boot.today)?'green':'amber'}">${c.status==='archived'?'已结束':c.checked_date===(frozen?.date||boot.today)?'已核对':'待核对'}</span></div><h3>${esc(c.name)}</h3><p class="cell-names">${esc([...new Set(wells.map(w => w.cell))].join(' · ') || '尚未填写细胞')}</p><p>${days.length?days.join(' / '):'Day —'} · ${wells.length}/${Object.keys(c.wells).length} ${boot.layouts[c.type]?'孔':'个培养单元'}</p>${groupQuantity(c)>1?`<p class="group-status-summary">${groupCounts(c).active} 在培养 · ${groupCounts(c).ended} 已结束${groupCounts(c).empty?' · '+groupCounts(c).empty+' 待填写':''}</p>`:''}<p>${esc(c.location||'未填写位置')}</p></button>${frozen?'':cultureCheckMarkup(c)}</div>`;
+  }).join('') || '<div class="no-match">没有符合条件的容器</div>';
 }
 function renderCultures() {
   const all = displayContainers(activeState());
@@ -144,17 +215,62 @@ function renderCultures() {
     $('#cultures').innerHTML = `<div class="empty-state">${emptyGraphic()}<h2>从第一个培养容器开始</h2><p>添加培养瓶或孔板，记录细胞和起始日期。<br>孔位可以多选，特殊处理一次填写、同时保存。</p><button class="button primary" id="first-container">＋ 添加我的第一个容器</button><div class="footer-note">尚未录入任何实验数据 · 本地数据库保存</div></div>`;
     $('#first-container').onclick = showCreate; return;
   }
-  const list = sortCulturesByCheck(all.filter(c => (!experimentFilter||Object.values(c.wells).some(w=>w.cell&&w.experiment===experimentFilter)) && (statusFilter === 'all' || c.status === statusFilter) && [c.name,c.id,...Object.values(c.display_members||{}).flatMap(m=>[m.container_name,m.container_id]),...wellList(c).map(w => w.cell)].join(' ').toLowerCase().includes(search.toLowerCase())));
+  const list = filterCulturesList(all);
   if (!list.some(c => c.id === currentId)) { currentId = list[0]?.id; selected=new Set(experimentFilter?experimentSelection(list[0],experimentFilter):(groupType(list[0]?.type)?groupDefaultSelection(list[0]):[])); }
-  $('#cultures').innerHTML = `<div class="cultures-layout"><div class="container-list"><div class="list-top"><span>容器 / ${list.length}</span><select aria-label="培养状态筛选" id="status-filter"><option value="active">在培养</option><option value="archived">已结束</option><option value="all">全部</option></select></div><input class="search" id="search" aria-label="搜索容器或细胞" placeholder="搜索容器、编号或细胞…" value="${esc(search)}">${list.map(c => {
-    const wells = wellList(c), days = [...new Set(wells.map(wellDayLabel))];
-    return `<div class="container-card-wrap"><button class="container-card ${c.id===currentId?'selected':''}" data-container="${c.id}"><div class="card-top">${typeBadge(c)}<span class="pill ${c.checked_date===(frozen?.date||boot.today)?'green':'amber'}">${c.status==='archived'?'已结束':c.checked_date===(frozen?.date||boot.today)?'已核对':'待核对'}</span></div><h3>${esc(c.name)}</h3><p class="cell-names">${esc([...new Set(wells.map(w => w.cell))].join(' · ') || '尚未填写细胞')}</p><p>${days.length?days.join(' / '):'Day —'} · ${wells.length}/${Object.keys(c.wells).length} ${boot.layouts[c.type]?'孔':'个培养单元'}</p>${groupQuantity(c)>1?`<p class="group-status-summary">${groupCounts(c).active} 在培养 · ${groupCounts(c).ended} 已结束${groupCounts(c).empty?' · '+groupCounts(c).empty+' 待填写':''}</p>`:''}<p>${esc(c.location||'未填写位置')}</p></button>${frozen?'':cultureCheckMarkup(c)}</div>`;
-  }).join('') || '<div class="no-match">没有符合条件的容器</div>'}</div><div id="detail"></div></div>`;
+  $('#cultures').innerHTML = `<div class="cultures-layout"><div class="container-list"><div class="list-top"><span id="container-list-count">容器 / ${list.length}</span><select aria-label="培养状态筛选" id="status-filter"><option value="active">在培养</option><option value="archived">已结束</option><option value="all">全部</option></select></div><input class="search" id="search" aria-label="搜索容器或细胞" placeholder="搜索容器、编号或细胞…" value="${esc(search)}"><div class="mobile-container-bar"><label>当前容器<select id="mobile-container-select" ${list.length ? '' : 'disabled'} aria-label="快速切换容器">${list.map(c=>`<option value="${esc(c.id)}" ${c.id===currentId?'selected':''}>${esc(c.name)} · ${esc(groupTypeLabel(c))}</option>`).join('')}</select></label></div><div id="container-cards">${containerCardsMarkup(list)}</div></div><div id="detail"></div></div>`;
+  const bindContainerCards = () => {
+    document.querySelectorAll('#container-cards [data-container]').forEach(b => b.onclick = () => { if (!canLeave())return;dirty=false;currentId=b.dataset.container;const c=current();selected=new Set(experimentFilter?experimentSelection(c,experimentFilter):(groupType(c.type)?groupDefaultSelection(c):[]));renderCultures(); });
+    bindCultureChecks($('#container-cards'));
+  };
+  const syncMobileSelect = nextList => {
+    const sel = $('#mobile-container-select');
+    if (!sel) return;
+    sel.innerHTML = nextList.map(c=>`<option value="${esc(c.id)}" ${c.id===currentId?'selected':''}>${esc(c.name)} · ${esc(groupTypeLabel(c))}</option>`).join('');
+    sel.value = currentId || '';
+    sel.disabled = !nextList.length;
+  };
+  const applySearch = nextValue => {
+    if (!searchInput.isConnected || nextValue === search) return;
+    const prevSearch = search;
+    search = nextValue;
+    const nextList = filterCulturesList(all);
+    const switching = !nextList.some(c => c.id === currentId);
+    if (switching && !canLeave()) {
+      search = $('#search').value = prevSearch;
+      return;
+    }
+    if (switching) {
+      dirty = false;
+      currentId = nextList[0]?.id;
+      selected = new Set(experimentFilter?experimentSelection(nextList[0],experimentFilter):(groupType(nextList[0]?.type)?groupDefaultSelection(nextList[0]):[]));
+    }
+    const count = $('#container-list-count');
+    if (count) count.textContent = '容器 / ' + nextList.length;
+    const cards = $('#container-cards');
+    if (cards) { cards.innerHTML = containerCardsMarkup(nextList); bindContainerCards(); }
+    syncMobileSelect(nextList);
+    if (switching) renderDetail();
+  };
   $('#status-filter').value = statusFilter;
   $('#status-filter').onchange = e => { if (!canLeave()) {e.target.value=statusFilter;return;} dirty=false;statusFilter=e.target.value;renderCultures(); };
-  $('#search').onchange = e => { if (!canLeave()) {e.target.value=search;return;} dirty=false;search=e.target.value;renderCultures();$('#search').focus(); };
-  document.querySelectorAll('[data-container]').forEach(b => b.onclick = () => { if (!canLeave())return;dirty=false;currentId=b.dataset.container;const c=current();selected=new Set(experimentFilter?experimentSelection(c,experimentFilter):(groupType(c.type)?groupDefaultSelection(c):[]));renderCultures(); });
-  bindCultureChecks($('#cultures'));
+  if ($('#mobile-container-select')) $('#mobile-container-select').onchange = e => {
+    if (!canLeave()) { e.target.value = currentId || ''; return; }
+    dirty = false; currentId = e.target.value;
+    const c = current(); selected = new Set(experimentFilter?experimentSelection(c,experimentFilter):(groupType(c.type)?groupDefaultSelection(c):[]));
+    renderCultures();
+  };
+  let searchTimer = null, composingSearch = false;
+  const searchInput = $('#search');
+  searchInput.addEventListener?.('compositionstart', () => { clearTimeout(searchTimer); composingSearch = true; });
+  searchInput.addEventListener?.('compositionend', e => { composingSearch = false; applySearch(e.target.value); });
+  searchInput.oninput = e => {
+    if (composingSearch || e.isComposing) return;
+    clearTimeout(searchTimer);
+    const val = e.target.value;
+    searchTimer = setTimeout(() => applySearch(val), 150);
+  };
+  searchInput.onchange = e => { clearTimeout(searchTimer); if (!composingSearch) applySearch(e.target.value); };
+  bindContainerCards();
   renderDetail();
 }
 function plateMarkup(c, readonly) {
@@ -177,7 +293,10 @@ function plateMarkup(c, readonly) {
       const key = letter+col, w = c.wells[key], day = frozen?w.day:dayOf(w);
       const hash = [...(w.cell+w.treatment)].reduce((n,ch)=>(n+ch.charCodeAt(0))%4,0);
       const palette = [['#e6eee0','#c9d9bd'],['#e1ebed','#bed3d8'],['#f3ead8','#e1cfa9'],['#ece5ed','#d6c4d8']][hash];
-      markup += `<button class="well ${w.cell?'filled':''} ${selected.has(key)?'selected':''}" style="--well-bg:${palette[0]};--well-border:${palette[1]}" data-well="${key}" aria-label="${key}${w.cell?' '+esc(w.cell)+' Day '+day:' 空孔'}" aria-pressed="${selected.has(key)}" title="${esc(key+' · '+(w.cell||'空孔')+(w.cell?' · Day '+day:'')+'\n'+w.treatment)}"><strong>${key}</strong><small>${esc(w.cell||'空')}</small></button>`;
+      const group = wellGroupFor(c,key);
+      const hoverText = [key, w.cell || '空孔', group && '培养组：'+group.name, w.cell && day != null && 'Day '+day].filter(Boolean).join(' · ');
+      const title = [hoverText, w.treatment].filter(Boolean).join('\n');
+      markup += `<button class="well ${w.cell?'filled':''} ${selected.has(key)?'selected':''}" style="--well-bg:${palette[0]};--well-border:${palette[1]}" data-well="${key}" ${group?`data-well-group-color="${wellGroupColorIndex(group)}"`:''} data-well-hover="${esc(hoverText)}" aria-label="${esc(hoverText)}" aria-pressed="${selected.has(key)}" title="${esc(title)}"><strong>${key}</strong><small>${esc(w.cell||'空')}</small></button>`;
     }
   }
   return markup+'</div></div>';
@@ -190,7 +309,7 @@ function renderDetail() {
   if(!readonly&&typeof wellGroupSelection==='function')selected=wellGroupSelection(c,selected);
   const grouped=groupType(c.type)&&groupQuantity(c)>1;
   if(plateInteraction.id!==c.id||readonly)plateInteraction={id:c.id,mode:'select'};
-  $('#detail').innerHTML = `<article class="detail"><div class="detail-head"><div><span class="eyebrow">${esc(c.id)}</span><h2>${esc(c.name)}</h2><p>${esc(c.location||'未填写位置')} · ${esc(groupTypeLabel(c))}${boot.layouts[c.type]?' · '+boot.layouts[c.type].join(' 行 × ')+' 列':''}</p></div><div class="detail-actions">${!frozen?`${cultureCheckMarkup(c)}<button class="button primary" id="transfer-container" ${c.status!=='active'||!wellList(c).length?'disabled':''}>传代 / 开展实验</button><button class="button secondary" id="container-activity" ${c.status!=='active'?'disabled':''}>＋ 追加操作</button><button class="text-button" id="container-journal">操作日志</button><button class="text-button" id="container-lineage">流转记录</button><button class="text-button" id="rename-container">${c.display_group?'编辑分组':'编辑信息'}</button>${c.display_group?'<button class="text-button" id="unmerge-container">取消显示合并</button>':''}<button class="text-button" id="archive-container">${c.status==='active'?'结束培养':'恢复培养'}</button>`:'<span class="pill amber">历史只读</span>'}</div></div>${!readonly?`<div class="culture-quick-actions"><span class="muted">常用操作</span>${typeof quickMediumButtons==='function'?quickMediumButtons(c):''}<button type="button" class="button secondary" id="quick-replate" ${!wellList(c).length?'disabled':''}>传代 / 移孔 / 扩孔</button></div>`:''}<div class="detail-body"><div class="plate-area"><div class="plate-top"><span>${grouped?'选择瓶 / 皿成员':readonly?'查看孔位记录':plateInteraction.mode==='select'?'点击或拖动 · 框选多个孔':'拖动所选孔组 · '+(plateInteraction.mode==='copy'?'复制':'移动')}</span><span>${wellList(c).length} / ${Object.keys(c.wells).length} 已填写</span></div>${typeof wellGroupControlsMarkup==='function'?wellGroupControlsMarkup(c,readonly):''}${plateMarkup(c,readonly)}<div class="selection-tools"><button id="select-all">${grouped?readonly?'选择全部历史成员':'选择全部在培养 / 待填写成员':'全选'}</button><button id="select-filled">选择已填写</button><button id="deselect">取消选择</button>${grouped&&!frozen?`<button type="button" id="end-group-members" ${![...selected].some(k=>memberActive(c.wells[k]))||readonly?'disabled':''}>结束所选瓶 / 皿</button><button type="button" id="restore-group-members" ${![...selected].some(k=>c.wells[k].cell&&(c.status==='archived'||c.wells[k].member_status==='archived'))?'disabled':''}>恢复所选瓶 / 皿</button>`:''}${!readonly&&boot.layouts[c.type]?`<span class="plate-mode-switch" role="group" aria-label="孔板鼠标操作模式">${[['select','框选'],['copy','孔位复制'],['move','孔位移动']].map(([mode,label])=>`<button type="button" data-plate-mode="${mode}" class="${plateInteraction.mode===mode?'active':''}" aria-pressed="${plateInteraction.mode===mode}">${label}</button>`).join('')}</span><button id="relocate-wells">跨孔板复制 / 移动 ↗</button>`:''}</div><div class="legend"><span><i></i>已填写（按细胞与处理配色）</span><span><i class="empty"></i>空孔</span><span><i class="selected"></i>选中</span></div><p class="plate-help" id="inline-placement-hint" aria-live="polite">${grouped?'默认选中全组在培养成员，可取消选择后单独选择几瓶。已结束成员保留只读记录，可恢复后继续填写。':readonly?'点击一个或多个孔，查看当时的细胞与处理记录。':'按住鼠标从一个孔拖到另一个孔，可框选整片区域。点击行号或列号可批量选择；勾选的字段才会写入。'}</p></div><aside class="inspector" id="inspector"></aside></div></article>`;
+  $('#detail').innerHTML = `<article class="detail"><div class="detail-head"><div><span class="eyebrow">${esc(c.id)}</span><h2>${esc(c.name)}</h2><p>${esc(c.location||'未填写位置')} · ${esc(groupTypeLabel(c))}${boot.layouts[c.type]?' · '+boot.layouts[c.type].join(' 行 × ')+' 列':''}</p>${!frozen?'<div class="detail-utility-links"><button class="text-button" id="container-journal">操作日志</button></div>':''}</div><div class="detail-actions">${!frozen?`${cultureCheckMarkup(c)}<button class="button primary" id="transfer-container" ${c.status!=='active'||!wellList(c).length?'disabled':''}>传代 / 开展实验</button><button class="button secondary" id="container-activity" ${c.status!=='active'?'disabled':''}>＋ 追加操作</button><details class="detail-more-menu"><summary class="button secondary">更多 ▾</summary><div class="detail-more-list"><button class="text-button" id="container-lineage">流转记录</button><button class="text-button" id="rename-container">${c.display_group?'编辑分组':'编辑信息'}</button>${c.display_group?'<button class="text-button" id="unmerge-container">取消显示合并</button>':''}<button class="text-button" id="archive-container">${c.status==='active'?'结束培养':'恢复培养'}</button></div></details>`:'<span class="pill amber">历史只读</span>'}</div></div>${!readonly?`<div class="culture-quick-actions"><span class="muted">常用操作</span>${typeof quickMediumButtons==='function'?quickMediumButtons(c):''}<button type="button" class="button secondary" id="quick-replate" ${!wellList(c).length?'disabled':''}>传代 / 移孔 / 扩孔</button></div>`:''}<div class="detail-body"><div class="plate-area"><div class="plate-top"><span>${grouped?'选择瓶 / 皿成员':readonly?'查看孔位记录':plateInteraction.mode==='select'?'点击或拖动 · 框选多个孔':'拖动所选孔组 · '+(plateInteraction.mode==='copy'?'复制':'移动')}</span><span>${wellList(c).length} / ${Object.keys(c.wells).length} 已填写</span></div>${wellGroupToolsMarkup(c,readonly)}${boot.layouts[c.type]?'<div class="plate-hover-readout" id="plate-hover-readout" aria-live="polite">悬停或聚焦孔位查看详情</div>':''}${plateMarkup(c,readonly)}<div class="selection-tools"><button id="select-all">${grouped?readonly?'选择全部历史成员':'选择全部在培养 / 待填写成员':'全选'}</button><button id="select-filled">选择已填写</button><button id="deselect">取消选择</button>${grouped&&!frozen?`<button type="button" id="end-group-members" ${![...selected].some(k=>memberActive(c.wells[k]))||readonly?'disabled':''}>结束所选瓶 / 皿</button><button type="button" id="restore-group-members" ${![...selected].some(k=>c.wells[k].cell&&(c.status==='archived'||c.wells[k].member_status==='archived'))?'disabled':''}>恢复所选瓶 / 皿</button>`:''}${!readonly&&boot.layouts[c.type]?`<span class="plate-mode-switch" role="group" aria-label="孔板鼠标操作模式">${[['select','框选'],['copy','孔位复制'],['move','孔位移动']].map(([mode,label])=>`<button type="button" data-plate-mode="${mode}" class="${plateInteraction.mode===mode?'active':''}" aria-pressed="${plateInteraction.mode===mode}">${label}</button>`).join('')}</span><button id="relocate-wells">跨孔板复制 / 移动 ↗</button>`:''}</div>${wellGroupDirectoryMarkup(c,readonly)}<div class="legend"><span><i></i>已填写</span><span><i class="empty"></i>空孔</span><span><i class="selected"></i>选中</span></div><p class="plate-help" id="inline-placement-hint" aria-live="polite">${grouped?'默认选中全组在培养成员，可取消选择后单独选择几瓶。已结束成员保留只读记录，可恢复后继续填写。':readonly?'点击一个或多个孔，查看当时的细胞与处理记录。':'按住鼠标从一个孔拖到另一个孔，可框选整片区域。点击行号或列号可批量选择；勾选的字段才会写入。'}</p></div><aside class="inspector" id="inspector"></aside></div></article>`;
   if (!frozen) {
     $('#archive-container').onclick = async () => { if(!canLeave())return;if(!confirm(c.status==='active'?'结束此容器的培养？记录和历史仍会保留。':'恢复此容器？原 Day 0 保留；若已重新复苏或传代，请随后更新起始日期。'))return;await command('status',{id:c.id,status:c.status==='active'?'archived':'active'}); };
     $('#rename-container').onclick = openContainerEditor;
@@ -224,6 +343,16 @@ function renderDetail() {
     const canStart=()=>{if(busy||!canLeave())return false;dirty=false;selectionBase=new Set(selected);return true;};
     if(!readonly&&plateInteraction.mode!=='select')bindInlineRelocation(root,{container:c,mode:plateInteraction.mode,getSelected:()=>selected,canStart,onSelectionChange:next=>changeSelection(next,false)});
     else bindWellSelection(root,{touchRange:true,getSelected:()=>selected,canStart,onChange:changeSelection});
+    const readout=$('#plate-hover-readout');
+    if(readout){
+      const defaultReadout=()=>selected.size?`当前已选 ${selected.size} 孔（悬停或聚焦孔位查看详情）`:'悬停或聚焦孔位查看详情';
+      readout.textContent=defaultReadout();
+      const showWell=e=>{const btn=e.target?.closest?.('[data-well-hover]');if(btn)readout.textContent=btn.dataset.wellHover;};
+      root.addEventListener?.('mouseover',showWell);
+      root.addEventListener?.('focusin',showWell);
+      root.addEventListener?.('mouseleave',()=>{readout.textContent=root.querySelector('[data-well-hover]:focus')?.dataset.wellHover || defaultReadout();});
+      root.addEventListener?.('focusout',e=>{if(!root.contains(e.relatedTarget))readout.textContent=defaultReadout();});
+    }
   }else document.querySelectorAll('#detail [data-well]').forEach(b => b.onclick = () => selectKeys([b.dataset.well],true));
   document.querySelectorAll('[data-row]').forEach(b => b.onclick = () => selectKeys(Object.keys(c.wells).filter(k=>k.startsWith(b.dataset.row)),true));
   document.querySelectorAll('[data-col]').forEach(b => b.onclick = () => selectKeys(Object.keys(c.wells).filter(k=>k.slice(1)===b.dataset.col),true));
@@ -313,6 +442,7 @@ function showCreate() {
 }
 function syncCreateQuantity(){
   const enabled=groupType($('#container-type').value),input=$('#container-quantity');input.disabled=!enabled;if(!enabled)input.value='1';
+  input.closest('.group-quantity-field').hidden=!enabled;
   $('#create-quantity-help').textContent=enabled?'1–100 瓶 / 皿；同组显示，每个成员独立留档。':'孔板按一块记录。';
 }
 function openContainerEditor(){
@@ -324,6 +454,7 @@ function openContainerEditor(){
   $('#edit-container-dialog').oncancel=e=>{if(busy)e.preventDefault();};
   function previewResize(){
     const type=$('#edit-type').value,input=$('#edit-quantity'),grouped=groupType(type);input.disabled=!grouped;if(!grouped)input.value='1';
+    input.closest('.group-quantity-field').hidden=!grouped;
     const quantity=grouped?Number(input.value):1,next=grouped?groupKeys(type,quantity):vesselKeys(type),old=Object.entries(c.wells);
     const lost=groupType(c.type)&&grouped?old.slice(next.length).filter(([,w])=>w.cell):old.filter(([key,w])=>w.cell&&!next.includes(key));
     $('#resize-summary').textContent=lost.length?'无法移除已有记录的成员：'+lost.map(([key])=>groupMemberLabel(c,key)).join('、')+'。结束成员会保留历史，不能直接删减已有记录。':'将保留原有成员记录；新增成员为空。保存后共 '+next.length+' 个培养单元。';
@@ -371,7 +502,7 @@ function renderHistory() {
 }
 function renderEvents() {
   $('#content').innerHTML=`<div class="section-head"><div><h2>操作记录</h2><span class="muted">保留每次保存的时间与改动。页面展示最近 200 条，完整历史包含在备份中。</span></div><button id="refresh-events" class="button secondary">刷新记录</button></div>${events.length?`<div class="table-wrap"><table><thead><tr><th>保存时间</th><th>操作</th><th>容器 / 孔位</th><th>保存内容</th></tr></thead><tbody>${events.map(e=>{
-    const p=e.payload,c=state.containers.find(c=>c.id===p.id);const revoked=e.undone?'<span class="pill amber">已撤销</span>':'';if(['activity','check','undo','lab_record_save','merge_groups','unmerge_groups','finish_sampling','well_group_save','well_group_remove'].includes(e.action)||p.group_context){const item=e.entry;return `<tr><td>${esc(shortTime(item.occurred_at))}<small>录入 ${esc(shortTime(e.at))}</small></td><td class="event-action">${esc(item.title)} ${revoked}</td><td>${esc(item.containers.map(c=>c.name).join(' · '))}<small>${esc(item.wells.join('、'))}</small></td><td class="wrap">${esc(item.summary)}${item.record_id?`<br><button type="button" class="text-button" data-lab-record="${esc(item.record_id)}">打开实验记录</button>`:''}</td></tr>`;}if(e.action==='transfer'||e.action==='relocate')return `<tr><td>${shortTime(e.at)}<small>#${e.id}</small></td><td class="event-action">${transferModes[p.mode]} ${revoked}</td><td>${e.action==='relocate'?esc(p.source_id+' → '+p.target_id):p.sources.length+' 个来源 → '+p.targets.length+' 组去向'}</td><td><button class="button secondary" data-lineage="${esc(p.transfer_id)}">查看流转凭据</button></td></tr>`;let details=p.patch?Object.entries(p.patch).map(([k,v])=>k==='medium'?'培养基：'+mediumPatchSummary(v):k==='cell_count'?countSummary(v):(fieldSpecs.find(f=>f[0]===k)?.[1]||k)+'：'+(v||'（清空）')).join('\n'):p.name|| (e.action==='confirm'?'用户确认当日所有在培养容器':p.status==='archived'?'结束培养':p.status==='active'?'恢复培养':e.action==='clear'?'清空选中孔位的当前内容':'');
+    const p=e.payload,c=state.containers.find(c=>c.id===p.id);const revoked=e.undone?'<span class="pill amber">已撤销</span>':'';if(e.action.startsWith('cryo_')||['activity','check','undo','lab_record_save','merge_groups','unmerge_groups','finish_sampling','well_group_save','well_group_remove'].includes(e.action)||p.group_context){const item=e.entry;return `<tr><td>${esc(shortTime(item.occurred_at))}<small>录入 ${esc(shortTime(e.at))}</small></td><td class="event-action">${esc(item.title)} ${revoked}</td><td>${esc(item.containers.map(c=>c.name).join(' · '))}<small>${esc(item.wells.join('、'))}</small></td><td class="wrap">${esc(item.summary)}${item.record_id?`<br><button type="button" class="text-button" data-lab-record="${esc(item.record_id)}">打开实验记录</button>`:''}</td></tr>`;}if(e.action==='transfer'||e.action==='relocate')return `<tr><td>${shortTime(e.at)}<small>#${e.id}</small></td><td class="event-action">${transferModes[p.mode]} ${revoked}</td><td>${e.action==='relocate'?esc(p.source_id+' → '+p.target_id):p.sources.length+' 个来源 → '+p.targets.length+' 组去向'}</td><td><button class="button secondary" data-lineage="${esc(p.transfer_id)}">查看流转凭据</button></td></tr>`;let details=p.patch?Object.entries(p.patch).map(([k,v])=>k==='medium'?'培养基：'+mediumPatchSummary(v):k==='cell_count'?countSummary(v):(fieldSpecs.find(f=>f[0]===k)?.[1]||k)+'：'+(v||'（清空）')).join('\n'):p.name|| (e.action==='confirm'?'用户确认当日所有在培养容器':p.status==='archived'?'结束培养':p.status==='active'?'恢复培养':e.action==='clear'?'清空选中孔位的当前内容':'');
     return `<tr><td>${shortTime(e.at)}<small>#${e.id}</small></td><td class="event-action">${actionNames[e.action]||esc(e.action)} ${revoked}</td><td>${esc(c?.name||p.name||'全部在培养容器')}<small>${esc(p.id||'')}${p.wells?' · '+esc(p.wells.join(', ')):''}</small></td><td class="wrap">${esc(details)}</td></tr>`;
   }).join('')}</tbody></table></div>`:'<div class="panel"><p class="muted">还没有保存操作。添加培养容器后，操作历史会自动记录在这里。</p></div>'}`;
   $('#refresh-events').onclick=()=>switchView('events');
@@ -386,6 +517,7 @@ $('#close-create').onclick=$('#cancel-create').onclick=()=>$('#create-dialog').c
 $('#create-form').onsubmit=async e=>{
   e.preventDefault();const form=new FormData(e.target);
   const payload=Object.fromEntries(form);
+  if($('#create-recipe-base').value && !$('#create-recipe').value)return toast('请选择该基础培养基的配方，或清空基础培养基。',true);
   if($('#create-recipe').value!==''){
     payload.medium=collectMediumPatch($('#create-medium-editor'));
     if(!payload.medium.base)return toast('请填写基础培养基名称',true);
@@ -393,7 +525,7 @@ $('#create-form').onsubmit=async e=>{
   const ok=await command('create',payload);
   if(ok){$('#create-dialog').close();view='today';experimentFilter='';currentId=state.containers.at(-1).id;statusFilter='active';search='';selected=new Set(Object.keys(current().wells));render();}
 };
-window.addEventListener('beforeunload',e=>{if(dirty||$('#manual-group-dialog').open||$('#well-group-dialog')?.open||$('#transfer-dialog').open||$('#transfer-system-dialog').open||$('#transfer-review-dialog').open||$('#occupied-target-dialog').open||$('#relocation-dialog').open||$('#activity-dialog').open||$('#quick-medium-dialog').open||$('#lab-record-dialog').open){e.preventDefault();e.returnValue='';}});
+window.addEventListener('beforeunload',e=>{if(dirty||$('#cryo-dialog').open||$('#manual-group-dialog').open||$('#well-group-dialog')?.open||$('#transfer-dialog').open||$('#transfer-system-dialog').open||$('#transfer-review-dialog').open||$('#occupied-target-dialog').open||$('#relocation-dialog').open||$('#activity-dialog').open||$('#quick-medium-dialog').open||$('#lab-record-dialog').open){e.preventDefault();e.returnValue='';}});
 async function start(){try{await load();render();}catch(error){$('#connection').hidden=false;$('#connection').textContent='未连接到本机工作台。请重新启动实验日记并刷新页面。';}}
 start();
 setInterval(async()=>{

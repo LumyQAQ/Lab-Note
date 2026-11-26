@@ -10,7 +10,7 @@ from copy import deepcopy
 from datetime import date, datetime
 from pathlib import Path
 from platform_config import TZ
-from medium import merge_medium, recipe_key, saved_media
+from medium import merge_medium, recipe_catalogue, recipe_key, saved_media
 from cell_count import normalize_count
 from group_units import DISH_TYPES, GROUP_TYPES, group_keys, group_quantity, member_active, normalize_quantity, resize_members
 from manual_groups import apply_merge, apply_unmerge, begin_projection, commit_projection, get_display_group
@@ -64,7 +64,76 @@ def uses_shared_defaults(container):
 
 
 class Conflict(ValueError):
-    pass
+    def __init__(self, message, conflict=None):
+        super().__init__(message)
+        self.conflict = conflict
+
+
+def _scope_snapshot(state, container_ids, record_ids):
+    containers = set(container_ids)
+    groups = {}
+    for group in state.get('display_groups', []):
+        if group['id'] in container_ids or container_ids.intersection(group['container_ids']):
+            groups[group['id']] = group
+            containers.update(group['container_ids'])
+    objects = {c['id']: c for c in state['containers'] if c['id'] in containers}
+    records = {r['id']: r for r in state.get('lab_records', []) if r['id'] in record_ids}
+    return {**objects, **groups}, records
+
+
+def _diagnose_scoped_conflict(conn, state, action, payload, revision):
+    simple = ('wells', 'clear', 'activity', 'rename', 'status', 'member_status',
+              'check', 'well_group_save', 'well_group_remove')
+    if action not in (*simple, 'transfer', 'finish_sampling', 'relocate'):
+        return None
+    if not 0 < state['revision'] - revision <= 256:
+        return None
+    container_ids, record_ids = set(), set()
+    if action in simple:
+        container_ids.add(payload.get('id'))
+    elif action == 'relocate':
+        container_ids.update((payload.get('source_id'), payload.get('target_id')))
+    else:
+        container_ids.update((payload.get('check_after'), payload.get('display_group_id')))
+        for part in (payload, payload.get('finish_sampling') or {}):
+            if not isinstance(part, dict):
+                raise ValueError('请求中的关联记录无效')
+            for key in ('sources', 'targets', 'target_updates', 'end_members'):
+                for item in part.get(key, []):
+                    if not isinstance(item, dict):
+                        raise ValueError('请求中的容器编号无效')
+                    container_ids.add(item.get('id'))
+            container_ids.update(part.get('end_sources', []))
+            record_ids.update(part.get('experiment_ids', []))
+    container_ids.discard(None)
+    distance = state['revision'] - revision
+    if not (container_ids or record_ids):
+        return None
+    # Every mutation appends exactly one event within the current-state transaction.
+    # Validate the opening revision before comparing the objects shown in the draft.
+    row = conn.execute('SELECT before_state FROM events ORDER BY id DESC LIMIT 1 OFFSET ?',
+                       (distance - 1,)).fetchone()
+    if not row:
+        return None
+    baseline = json.loads(row['before_state'])
+    if baseline['revision'] != revision:
+        return None
+    previous = _scope_snapshot(baseline, container_ids, record_ids)
+    current = _scope_snapshot(state, container_ids, record_ids)
+    changes = []
+    for old, new in zip(previous, current):
+        changes.append([(new.get(key) or old[key]).get('name') or
+                        (new.get(key) or old[key]).get('title') or key
+                        for key in sorted(old.keys() | new.keys()) if old.get(key) != new.get(key)])
+    return {'current_revision': state['revision'],
+            'level': 'scope_changed' if any(changes) else 'unrelated',
+            'changed_containers': changes[0], 'changed_records': changes[1]}
+
+
+def _request_id(value):
+    if not isinstance(value, str) or not 1 <= len(value.strip()) <= 128:
+        raise ValueError('请求编号无效')
+    return value.strip()
 
 
 class Store:
@@ -83,6 +152,8 @@ class Store:
                 CREATE TABLE IF NOT EXISTS events (
                     id INTEGER PRIMARY KEY, at TEXT NOT NULL, action TEXT NOT NULL,
                     payload TEXT NOT NULL, before_state TEXT NOT NULL, after_state TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS command_requests (
+                    request_id TEXT PRIMARY KEY, payload_hash TEXT NOT NULL, event_id INTEGER NOT NULL);
                 CREATE TABLE IF NOT EXISTS snapshots (
                     id TEXT PRIMARY KEY, date TEXT NOT NULL, at TEXT NOT NULL,
                     source TEXT NOT NULL, verified INTEGER NOT NULL, state TEXT NOT NULL);
@@ -200,7 +271,7 @@ class Store:
                 remember(json.loads(current[0]))
                 self._recipe_cache = history
                 self._recipe_cursor, self._recipe_last_undo = newest, last_undo
-            return deepcopy(list(reversed(self._recipe_cache.values())))
+            return recipe_catalogue(reversed(self._recipe_cache.values()))
 
     def medium_history(self):
         history={'bases':[],'cytokines':[],'additives':[],'additive_entries':[]};seen={key:set() for key in history}
@@ -307,15 +378,49 @@ class Store:
             if parsed.replace(tzinfo=TZ) > current_time():
                 raise ValueError('处理时间不能填写为未来时间；计划请写入备注')
 
-    def mutate(self, action, payload, revision):
+    def command_status(self, request_id):
+        request_id = _request_id(request_id)
+        with self.connect() as conn:
+            conn.execute('BEGIN')
+            revision = json.loads(conn.execute('SELECT body FROM current_state WHERE id=1').fetchone()[0])['revision']
+            row = conn.execute('''SELECT e.id, e.at, e.action, r.target_event_id AS undone
+                                  FROM command_requests q JOIN events e ON e.id=q.event_id
+                                  LEFT JOIN reversals r ON r.target_event_id=e.id
+                                  WHERE q.request_id=?''', (request_id,)).fetchone()
+            if not row:
+                return {'committed': False, 'revision': revision}
+            return {'committed': row['undone'] is None, 'undone': row['undone'] is not None,
+                    'event_id': row['id'], 'at': row['at'], 'action': row['action'], 'revision': revision}
+
+    def mutate(self, action, payload, revision, client_request_id=None):
         if not isinstance(payload, dict) or not isinstance(revision, int):
             raise ValueError('请求缺少记录版本')
+        if not isinstance(action, str):
+            raise ValueError('请求缺少操作类型')
+        if client_request_id is not None:
+            client_request_id = _request_id(client_request_id)
+            canonical = json.dumps([action, payload], ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+            payload_hash = hashlib.sha256(canonical.encode()).hexdigest()
         with self.lock, self.connect() as conn:
             conn.execute('BEGIN IMMEDIATE')
             before = conn.execute('SELECT body FROM current_state WHERE id=1').fetchone()[0]
             state = json.loads(before)
+            if client_request_id:
+                prior = conn.execute('''SELECT q.payload_hash, r.target_event_id AS undone
+                                        FROM command_requests q LEFT JOIN reversals r ON r.target_event_id=q.event_id
+                                        WHERE q.request_id=?''', (client_request_id,)).fetchone()
+                if prior:
+                    if prior['payload_hash'] != payload_hash:
+                        raise ValueError('请求编号已被不同内容使用，请重新核对操作')
+                    if prior['undone'] is not None:
+                        raise Conflict('本次提交已被撤销。请刷新后核对当前记录。')
+                    self.add_plate_defaults(conn, state)
+                    self.add_well_defaults(conn, state)
+                    self.add_medium_defaults(conn, state)
+                    return state
             if state['revision'] != revision:
-                raise Conflict('另一窗口已更新记录。请刷新后重新操作；本次修改未写入。')
+                conflict = _diagnose_scoped_conflict(conn, state, action, payload, revision)
+                raise Conflict('另一窗口已更新记录。请刷新后重新操作；本次修改未写入。', conflict)
             if action not in ['merge_groups', 'unmerge_groups', 'well_group_save', 'well_group_remove'] and not get_display_group(state, payload.get('id')):
                 self.add_plate_defaults(conn, state)
                 self.add_well_defaults(conn, state)
@@ -346,6 +451,9 @@ class Store:
             elif action == 'well_group_remove':
                 from well_groups import apply_well_group_remove
                 payload = apply_well_group_remove(state, payload)
+            elif action.startswith('cryo_'):
+                from cryo_storage import apply_cryo_command
+                payload = apply_cryo_command(state, action, payload, now)
             elif action == 'create':
                 name = str(payload.get('name', '')).strip()
                 kind = payload.get('type', '')
@@ -545,6 +653,9 @@ class Store:
             conn.execute('UPDATE current_state SET body=? WHERE id=1', (body,))
             inserted=conn.execute('INSERT INTO events(at,action,payload,before_state,after_state) VALUES(?,?,?,?,?)',
                          (now, action, encode(payload), before, body))
+            if client_request_id:
+                conn.execute('INSERT INTO command_requests VALUES(?,?,?)',
+                             (client_request_id, payload_hash, inserted.lastrowid))
             if undo_target is not None:
                 conn.execute('INSERT INTO reversals VALUES(?,?,?)',(undo_target,inserted.lastrowid,now))
         return state

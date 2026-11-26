@@ -36,6 +36,18 @@ def main():
             with http.open(base+'/api/state',timeout=8) as res:
                 boot=json.load(res)
             assert Path(boot['data_dir'])==data.resolve() and not boot['state']['containers'] and not boot['state'].get('lab_records',[])
+            assert not boot['state'].get('frozen_batches') and not boot['state'].get('cryo_storage', {}).get('devices')
+            for route in ('/cryo-storage.js', '/cryo-storage.css'):
+                with http.open(base+route,timeout=8) as asset:
+                    assert asset.status==200 and asset.read(32)
+            # Exercise new commands on the isolated database through the embedded Python runtime.
+            command_data=json.dumps({'action':'cryo_device_save','revision':boot['state']['revision'],
+                                     'client_request_id':'windows-check-inventory',
+                                     'payload':{'name':'Test storage','kind':'custom'}}).encode()
+            for attempt in range(2):
+                req=Request(base+'/api/command',data=command_data,headers={'Content-Type':'application/json','X-Lab-Token':boot['token']})
+                with http.open(req,timeout=10) as res: updated=json.load(res)['state']
+                assert len(updated['cryo_storage']['devices'])==1 and updated['revision']==boot['state']['revision']+1
             req=Request(base+'/api/backup',data=b'{}',headers={'Content-Type':'application/json','X-Lab-Token':boot['token']})
             with http.open(req,timeout=10) as res:backup=json.load(res)
             with http.open(base+backup['url'],timeout=10) as res, ZipFile(io.BytesIO(res.read())) as z:

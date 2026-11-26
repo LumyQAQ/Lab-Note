@@ -50,9 +50,9 @@ function homePlateMarkup(c,compact=false) {
   const dims = boot.layouts[c.type];
   if (!dims) {
     if(compact){
-      const dish=dishType(c.primary_type||c.type);
+      const dish=dishType(c.primary_type||c.type),filled=homeOccupied(c).length>0;
       const shape=dish?'<ellipse cx="90" cy="47" rx="57" ry="20"/><path d="M33 47v20c0 11 26 20 57 20s57-9 57-20V47"/><ellipse class="home-vessel-medium" cx="90" cy="61" rx="49" ry="14"/>':'<path d="M111 20l18 13-9 15v35a9 9 0 0 1-9 9H51a9 9 0 0 1-9-9V55a10 10 0 0 1 5-9l53-27z"/><path class="home-vessel-medium" d="M49 65h64v18a3 3 0 0 1-3 3H52a3 3 0 0 1-3-3z"/><path d="M114 14l22 16-7 10-22-16z"/>';
-      return `<div class="home-vessel home-vessel-compact"><button type="button" class="home-vessel-unit ${homeOccupied(c).length?'filled':''}" data-home-vessel="${esc(c.id)}" aria-label="打开 ${esc(c.name)} ${esc(groupTypeLabel(c))} 全组记录"><svg viewBox="0 0 180 110" role="img" aria-label="${esc(groupTypeLabel(c))}">${shape}</svg></button></div>`;
+      return `<div class="home-vessel home-vessel-compact"><button type="button" class="home-vessel-unit ${filled?'filled':''}" data-home-vessel="${esc(c.id)}" aria-label="打开 ${esc(c.name)} ${esc(groupTypeLabel(c))} 全组记录"><svg viewBox="0 0 180 110" role="img" aria-label="${esc(groupTypeLabel(c))}">${shape}</svg><span class="home-vessel-brief"><strong>${filled||c.status!=='active'?'打开培养记录 ↗':'填写细胞记录 ↗'}</strong><small class="home-vessel-count">${esc(groupTypeLabel(c))}${groupQuantity(c)>1?' · '+groupCounts(c).active+'/'+groupQuantity(c)+' 在培养':''}</small></span></button></div>`;
     }
     const wells=homeOccupied(c).map(([,w])=>w),days=[...new Set(wells.map(homeDay))];
     return `<div class="home-vessel"><button type="button" class="home-vessel-unit ${wells.length?'filled':''}" data-home-vessel="${esc(c.id)}" aria-label="打开 ${esc(c.name)} ${esc(groupTypeLabel(c))} 全组记录"><span>${esc(groupTypeLabel(c))}</span><strong>${esc(homeCellNames(wells).join(' · ') || '尚未填写细胞')}</strong><small>${esc(days.join(' / ') || '点击填写培养记录')} ↗</small></button></div>`;
@@ -76,7 +76,7 @@ function homeActionEnabled(c) {
 }
 function homeActionsMarkup(c) {
   const disabled=!homeActionEnabled(c),checked=c.checked_date===boot.today;
-  return `<div class="home-card-actions" role="group" aria-label="${esc(c.name)} 今日操作">${[['medium','换液','记录换液或半换液并核对'],['no_operation','未操作','未操作，确认今日核对'],['experiment','实验','打开传代 / 开展实验操作面板']].map(([action,label,title])=>`<button type="button" data-home-action="${action}" data-home-container-id="${esc(c.id)}" title="${esc(title)}" aria-label="${esc(c.name)}：${esc(title)}" ${action==='medium'?'aria-expanded="false"':''} ${disabled||(checked&&action==='no_operation')?'disabled':''}>${label}</button>`).join('')}</div><div class="home-medium-options" data-home-medium-options="${esc(c.id)}" hidden>${[['full','换液'],['half','半换液']].map(([kind,label])=>`<button type="button" data-home-medium="${kind}" data-home-container-id="${esc(c.id)}" ${disabled?'disabled':''}>${label}</button>`).join('')}</div>`;
+  return `<div class="home-card-actions" role="group" aria-label="${esc(c.name)} 今日操作">${[['topup','补液','记录补液并核对'],['medium','换液','记录换液或半换液并核对'],['no_operation','未操作','未操作，确认今日核对'],['experiment','实验','打开传代 / 开展实验操作面板']].map(([action,label,title])=>`<button type="button" data-home-action="${action}" data-home-container-id="${esc(c.id)}" title="${esc(title)}" aria-label="${esc(c.name)}：${esc(title)}" ${action==='medium'?'aria-expanded="false"':''} ${disabled||(checked&&action==='no_operation')?'disabled':''}>${label}</button>`).join('')}</div><div class="home-medium-options" data-home-medium-options="${esc(c.id)}" hidden>${[['full','换液'],['half','半换液']].map(([kind,label])=>`<button type="button" data-home-medium="${kind}" data-home-container-id="${esc(c.id)}" ${disabled?'disabled':''}>${label}</button>`).join('')}</div>`;
 }
 function openHomeCellOperation(id){
   const c=displayContainers().find(c=>c.id===id);
@@ -93,6 +93,7 @@ function bindHomeActions(root) {
   root.querySelectorAll('[data-home-action]').forEach(button=>button.onclick=()=>{
     const c=displayContainers().find(c=>c.id===button.dataset.homeContainerId);
     if(!homeActionEnabled(c))return;
+    if(button.dataset.homeAction==='topup')return openQuickMedium(c.id,'topup','all');
     if(button.dataset.homeAction==='experiment')return openHomeCellOperation(c.id);
     if(button.dataset.homeAction==='no_operation')return confirmCultureToday(c.id,'no_operation');
     if(typeof dirty!=='undefined'&&dirty){toast('请先保存当前修改，再记录换液。',true);return;}
@@ -114,7 +115,16 @@ function homeContainerMarkup(c) {
   const checked = c.checked_date === boot.today, active = c.status === 'active';
   const compact=homeDensity==='compact';
   const heading=`<header><div>${compact?'':`<span class="home-type">${esc(groupTypeLabel(c))}</span>`}<h3><button type="button" class="home-name" data-home-open="${esc(c.id)}" aria-label="打开 ${esc(c.name)} 的培养记录">${esc(c.name)}</button></h3></div><span class="home-status ${active&&checked?'checked':''}">${!active?'已结束':checked?'今日已核对':'今日待核对'}</span></header>`;
-  if(compact)return `<article class="home-container home-container-compact">${heading}${homePlateMarkup(c,true)}${homeActionsMarkup(c)}</article>`;
+  if(compact){
+    const cells=homeCellNames(wells),days=[...new Set(wells.map(homeDay))];
+    const bases=[...new Set(wells.map(w=>w.medium?.base).filter(Boolean))];
+    if(!bases.length&&c.medium_defaults?.base)bases.push(c.medium_defaults.base);
+    const scope=boot.layouts[c.type]?`${occupied.length}/${Object.keys(c.wells||{}).length} 孔`:(groupQuantity(c)>1?`${groupCounts(c).active}/${groupQuantity(c)} 在培养`:'');
+    const secondary=[c.location||'未填写位置',bases.slice(0,2).join(' / '),scope].filter(Boolean).join(' · ');
+    const compactMeta=`<div class="home-compact-meta"><p class="home-compact-primary"><span class="home-compact-type">${esc(groupTypeLabel(c))}</span><strong>${esc(cells.join(' · ')||'尚未填写细胞')}</strong>${days.length?`<span class="home-compact-day">${esc(days.slice(0,2).join(' / '))}</span>`:''}</p><p class="home-compact-secondary">${esc(secondary)}</p></div>`;
+    const emptyPlateCta=active&&boot.layouts[c.type]&&!occupied.length?`<button type="button" class="home-empty-cta" data-home-open="${esc(c.id)}">填写细胞记录 ↗</button>`:'';
+    return `<article class="home-container home-container-compact">${heading}${compactMeta}${homePlateMarkup(c,true)}${emptyPlateCta}${homeActionsMarkup(c)}</article>`;
+  }
   const days = [...new Set(wells.map(homeDay))];
   const descriptions=[...new Set(wells.map(w=>w.treatment).filter(Boolean))];
   const lastOperation=(boot.workday?.timeline||[]).find(e=>!e.undone&&e.is_operation&&(e.container_ids||[]).some(id=>id===c.id||c.container_ids?.includes(id)));

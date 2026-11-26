@@ -104,3 +104,13 @@
 !/tests/test_unit_choices.cjs
 !/docs/downloads/lab-note-v1.2.1.zip
 !/docs/downloads/lab-note-v1.2.1.zip.sig
+!/app/cryo_storage.py
+!/app/static/cryo-storage.css
+!/app/static/cryo-storage.js
+!/tests/test_cryo_public.py
+!/tests/test_command_recovery.py
+!/tests/test_command_recovery.cjs
+!/tests/test_medium_shortcuts.py
+!/tests/test_replate_layout.cjs
+!/docs/downloads/lab-note-v1.3.0.zip
+!/docs/downloads/lab-note-v1.3.0.zip.sig

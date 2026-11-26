@@ -6,3 +6,7 @@
 #create-recipe-details summary {cursor:pointer;color:var(--green)}
 #create-recipe-fields .medium-help, #create-recipe-fields .medium-list-note,
 #create-recipe-fields .medium-apply input, #create-recipe-fields .medium-editor h3 {display:none}
+
+#create-dialog .recipe-picker select {max-width:100%}
+#create-recipe-fields {overflow-wrap:anywhere}
+[data-medium-preset-info]:empty {display:none}

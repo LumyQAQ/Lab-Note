@@ -49,10 +49,21 @@ function lineageLinksMarkup(container,keys,sourceState=activeState()) {
       }).join('')}</div></div>`;
     }).join('')}</div>`;
   };
-  const body=relation('upstream','上游来源',upstream)+relation('siblings','同次分装/铺板/扩孔',siblings)+relation('downstream','下游去向',downstream);
-  return body?`<details class="lineage-links"><summary>培养来源关系 · 上游 ${upstream.size} / 同次 ${siblings.size} / 下游 ${downstream.size}</summary>${body}</details>`:'';
+  const frozenStockLinks=refs.map(ref=>{
+    const lots=(sourceState.frozen_batches||[]).filter(lot=>
+      (lot.sources||[]).some(source=>source.id===ref.id && source.well===ref.well));
+    if(!lots.length)return '';
+    const label=esc(ref.well)+' · 关联冻存批次 '+lots.length;
+    if(frozen)return `<p>${label}：${lots.map(lot=>esc(lot.name)).join('、')}</p>`;
+    return `<button type="button" class="text-button" data-cryo-linked-container="${esc(ref.id)}" data-cryo-linked-well="${esc(ref.well)}">${label} ↗</button>`;
+  }).join('');
+  const body=frozenStockLinks+relation('upstream','上游来源',upstream)+relation('siblings','同次分装/铺板/扩孔',siblings)+relation('downstream','下游去向',downstream);
+  return body?`<details class="lineage-links"><summary>培养来源关系 · 上游 ${upstream.size} / 同次 ${siblings.size} / 下游 ${downstream.size}${frozenStockLinks?' / 冻存':''}</summary>${body}</details>`:'';
 }
 function bindLineageLinks(root) {
+  root.querySelectorAll('[data-cryo-linked-container]').forEach(button=>button.onclick=()=>{
+    if(!busy && !frozen)openCryoLinkedLots(button.dataset.cryoLinkedContainer,button.dataset.cryoLinkedWell);
+  });
   root.querySelectorAll('[data-culture-link-id]').forEach(button=>button.onclick=()=>{
     if(button.disabled||busy)return;
     const id=button.dataset.cultureLinkId,well=button.dataset.cultureLinkWell;

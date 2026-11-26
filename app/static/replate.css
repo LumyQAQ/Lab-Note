@@ -16,3 +16,10 @@
 .condition-quick{margin:12px 0}.condition-quick>span,.condition-rename{font-size:13px;color:var(--muted)}
 .condition-quick .button{padding:6px 12px}.condition-quick [aria-pressed="true"]{background:var(--green);color:white}
 .condition-quick [hidden]{display:none}.next-source-picker{margin-block:12px 22px}.next-source-picker h4{margin-bottom:8px}
+
+.transfer-well-grid.is-anchor-place { background: #edf4ea; border-radius: 10px; outline: 2px dashed #5d866b; outline-offset: 2px; }
+.transfer-well-grid.is-anchor-place .target-well:not(:disabled) { cursor: crosshair; }
+.transfer-well-grid.is-anchor-place .target-well:not(:disabled):hover { background: #d4e8cd; border-color: #3c6a4d; color: #1f4431; }
+[data-replate-anchor][aria-pressed="true"] { background: #2d5a43; color: #fff; text-decoration: none; border-radius: 6px; padding: 4px 9px; }
+.next-source-picker-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.next-source-picker-head h4 { margin: 0; }

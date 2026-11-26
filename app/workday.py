@@ -46,7 +46,7 @@ def apply_activity(state,payload,now=None):
     exchanging=kind in ['medium','medium_change']
     confirm_checked=payload.get('confirm_checked',False)
     if type(confirm_checked) is not bool:raise ValueError('今日核对选项须为勾选或未勾选')
-    if not exchanging and 'confirm_checked' in payload:raise ValueError('同时核对选项仅用于换液操作')
+    if not exchanging and kind!='topup' and 'confirm_checked' in payload:raise ValueError('同时核对选项仅用于换液或补液操作')
     exchange_kind=payload.get('exchange_kind','full')
     if exchanging and exchange_kind not in ['full','half']:raise ValueError('请选择换液或半换液')
     if not exchanging and ('exchange_kind' in payload or 'medium_patch' in payload):raise ValueError('换液选项仅用于换液操作')
@@ -121,6 +121,43 @@ def event_entry(conn,row,cache=None):
         summary=p['title']+' · '+dict(module['statuses'])[p['status']]+' · 记录日期 '+p['record_date']+' · v'+str(p['version'])
         b,a=states();record=next((r for r in a.get('lab_records',[]) if r['id']==p['record_id']),{})
         containers=list({s['container_id']:{'id':s['container_id'],'name':s['container_name']} for s in record.get('all_cell_sources',[])}.values())
+    elif action=='cryo_setup_preset':
+        title='初始化冻存设备与盒位'
+        summary=f"{p['device_name']}{(' / '+p['rack_name']) if p.get('rack_name') else ''} · {p['box_count']} 盒（{p['grid']}）"
+    elif action in ('cryo_device_save','cryo_device_delete'):
+        title='删除冻存设备' if action.endswith('delete') else ('修改冻存设备' if p.get('change')=='update' else '新增冻存设备')
+        summary=p.get('name','')
+    elif action in ('cryo_rack_save','cryo_rack_delete'):
+        title='删除冻存吊 / 架' if action.endswith('delete') else ('修改冻存吊 / 架' if p.get('change')=='update' else '新增冻存吊 / 架')
+        summary=p.get('name','') + (f" · 生成 {len(p['box_ids'])} 盒" if p.get('box_ids') else '')
+    elif action in ('cryo_box_save','cryo_box_delete'):
+        title='删除冻存盒' if action.endswith('delete') else ('修改冻存盒' if p.get('change')=='update' else '新增冻存盒')
+        summary=p.get('name','')
+    elif action=='cryo_stock_create':
+        title='登记已有冻存库存';operation=True;occurred=p.get('at') or occurred
+        summary=f"{p['name']} · {p['vials']} 管" + (f" · 已落位 {p['placed']} 管" if p.get('placed') else '')
+    elif action=='cryo_place_vials':
+        title='冻存管入盒落位';operation=True
+        summary=f"{p['name']} · 落位 {p['placed']} 管" + (f" · {p['location']}" if p.get('location') else '')
+    elif action=='cryo_move_slots':
+        title='调整冻存格位';operation=True
+        summary=f"移动 {p['moved']} 管"
+    elif action=='cryo_batch_update':
+        title='修改冻存信息'
+        summary=p.get('name','')
+    elif action=='cryo_mark_contamination':
+        title='撤销冻存复苏污染标记' if p.get('cleared') else '标记复苏后细胞污染';operation=True
+        occurred=p.get('at') or occurred
+        summary=p.get('name','') + (f" · {p['kind']}" if p.get('kind') else '')
+
+    elif action in ('cryo_discard_vials','cryo_withdraw_vials'):
+        title='废弃冻存管' if action=='cryo_discard_vials' else ('取出并复苏' if p.get('mode')=='thaw' else '取出冻存管')
+        occurred=p.get('at') or occurred
+        operation=True
+        summary=f"{p['name']} · {p['vials']} 管 · 剩余 {p['remaining']} 管"
+        if p.get('slots'):
+            summary+=' · 格位 '+'、'.join(f"{slot['box_name']}/{slot['slot']}" for slot in p['slots'])
+        if p.get('reason'):summary+=' · '+p['reason']
     elif action=='finish_sampling':
         occurred=p['at'];operation=True
         containers=names(p['end_sources'])

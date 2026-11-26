@@ -158,6 +158,32 @@ function addTransferContainer(type='T25',name='',quantity=1){
   transferDraft.newContainers.push({key,type,quantity,name:name||'新容器 '+transferSerial,location:current()?.location||''});
   transferDraft.targets.push({ref:key,wells:groupType(type)?vesselKeys(type,quantity):[vesselKeys(type)[0]],sourceKeys:Object.keys(transferDraft.sources),append:false,treatment:'',concentration:'',systemMode:'same',locked:false});
 }
+function addNewTransferDestination(){
+  const d=transferDraft;
+  if(d.mode==='replate'&&d.targets.length>0){
+    const sourceIds=[...new Set([...Object.values(d.sources).map(s=>s.id),...d.targets.flatMap(t=>t.cellSourceIds||[])].filter(Boolean))];
+    const assigned=new Set(d.targets.flatMap(t=>t.sourceKeys));
+    const unassignedInDraft=Object.keys(d.sources).filter(k=>!assigned.has(k));
+    const remainingOnPlates=sourceOptions().filter(s=>sourceIds.includes(s.id)&&!assigned.has(s.key));
+    const existingAllPooled=d.targets.every(t=>t.distribution==='pooled');
+    if(unassignedInDraft.length>0||(remainingOnPlates.length>0&&!existingAllPooled)){
+      const prev=transferTarget(d.targets.at(-1)?.ref);
+      const isPlate=!!(prev&&boot.layouts[prev.type]);
+      const type=isPlate?prev.type:'T25';
+      const quantity=isPlate?1:(prev?groupQuantity(prev):1);
+      const baseName=isPlate?(prev.name||'新容器').replace(/\s*·\s*第\s*\d+\s*板$/,''):'';
+      const name=isPlate?`${baseName} · 第 ${d.newContainers.length+1} 板`:'新容器 '+(transferSerial+1);
+      const key='new-'+(++transferSerial);
+      d.newContainers.push({key,type,quantity,name,location:prev?.location||current()?.location||''});
+      const sourceKeys=unassignedInDraft.length?transferSourceOrder(unassignedInDraft):[];
+      d.targets.push({ref:key,wells:[],sourceKeys,distribution:'paired',append:false,treatment:'',concentration:'',systemMode:'same',locked:false,replateAuto:true,continueCellGroup:true,cellSourceIds:sourceIds,sourceViewId:sourceIds[0],addedSourceKeys:[]});
+      syncReplateTarget(d.targets.at(-1));
+      return;
+    }
+  }
+  addTransferContainer();
+  if(d.mode==='replate')syncReplateTarget(d.targets.at(-1));
+}
 function transferTarget(ref){
   const created=transferDraft.newContainers.find(c=>c.key===ref);if(created)return created;
   const original=state.containers.find(c=>c.id===ref);return original?{...original,...transferDraft.targetUpdates?.[ref]}:undefined;
@@ -179,7 +205,7 @@ function detachTransferTarget(index){
   const oldKeys=transferTargetKeys(c),newKeys=vesselKeys(c.type,groupQuantity(c));
   t.wells=t.wells.map(w=>newKeys[oldKeys.indexOf(w)]).filter(Boolean);
   if(t.cultivationReference?.kind==='target'){t.systemMode='same';delete t.cultivation;delete t.cultivationReference;}
-  t.ref=key;t.append=false;t.replateAuto=false;
+  t.ref=key;t.append=false;t.replateAuto=d.mode==='replate'&&!t.wells.length;t.anchorPlaceMode=false;
   if(d.mode==='replate')syncReplateTarget(t);else delete t.replateMap;
   pruneTransferTargets();invalidateTransfer();renderTransfer();
 }
@@ -189,6 +215,7 @@ function updateTransferTarget(ref,patch){
   const kind=patch.type||c.type,oldQuantity=groupQuantity(c),quantity=Number(patch.quantity??(groupType(kind)?oldQuantity:1));
   if(!boot.types.includes(kind)||!Number.isInteger(quantity)||quantity<1||quantity>100||(!groupType(kind)&&quantity!==1))throw new Error('瓶/皿数量须为1–100的整数，孔板按一块记录。');
   const shapeChanged=kind!==c.type||quantity!==oldQuantity;
+  const autoTargets=new Set(shapeChanged?d.targets.filter(t=>t.ref===ref&&d.mode==='replate'&&t.replateAuto===true&&!!c.key):[]);
   if(shapeChanged){
     const original=c.id&&state.containers.find(x=>x.id===c.id);
     const keys=original&&groupType(original.type)&&groupType(kind)?groupResizeKeys(original,kind,quantity):vesselKeys(kind,quantity),oldKeys=transferTargetKeys(c);
@@ -207,7 +234,7 @@ function updateTransferTarget(ref,patch){
   }
   patch={...patch,quantity};
   if(c.key)Object.assign(c,patch);else{d.targetUpdates||={};d.targetUpdates[ref]={...(d.targetUpdates[ref]||{id:ref,name:c.name,type:c.type,quantity:oldQuantity,location:c.location}),...patch};}
-  if(shapeChanged)d.targets.filter(t=>t.ref===ref).forEach(t=>{t.replateAuto=false;if(d.mode==='replate')syncReplateTarget(t);else delete t.replateMap;});
+  if(shapeChanged)d.targets.filter(t=>t.ref===ref).forEach(t=>{t.anchorPlaceMode=false;t.replateAuto=autoTargets.has(t);if(d.mode==='replate')syncReplateTarget(t);else delete t.replateMap;});
   invalidateTransfer();
 }
 function syncTransferTargetText(ref){
@@ -264,12 +291,12 @@ function renderTransfer(){
     if(transferSourceLocked(input.dataset[attr])){toast('此来源参数已锁定，请先取消锁定。',true);renderTransfer();return;}
     d.sources[input.dataset[attr]][key]=input.value;invalidateTransfer();
   });
-  if($('#add-new-transfer'))$('#add-new-transfer').onclick=()=>{addTransferContainer();if(d.mode==='replate')syncReplateTarget(d.targets.at(-1));invalidateTransfer();renderTransfer();};
+  if($('#add-new-transfer'))$('#add-new-transfer').onclick=()=>{addNewTransferDestination();invalidateTransfer();renderTransfer();};
   if($('#link-existing-transfer'))$('#link-existing-transfer').onclick=addExistingTransferTarget;
   document.querySelectorAll('[data-target-lock]').forEach(b=>b.onclick=()=>toggleTransferTargetLock(+b.dataset.targetLock));
   document.querySelectorAll('[data-remove-target]').forEach(b=>b.onclick=()=>guardTarget(+b.dataset.removeTarget,()=>{const [removed]=d.targets.splice(+b.dataset.removeTarget,1);cleanupReplateCellSources(removed);pruneTransferTargets();invalidateTransfer();renderTransfer();}));
   document.querySelectorAll('[data-target-ref]').forEach(input=>input.onchange=()=>guardTarget(+input.dataset.targetRef,()=>{
-    const t=d.targets[+input.dataset.targetRef],before=captureTargetSelection(t);t.ref=input.value;t.append=false;t.replateAuto=false;
+    const t=d.targets[+input.dataset.targetRef],before=captureTargetSelection(t);t.ref=input.value;t.append=false;t.replateAuto=false;t.anchorPlaceMode=false;
     if(d.mode==='replate')syncReplateTarget(t);else{t.wells=[];delete t.replateMap;}
     // A previous target-based recipe cannot silently follow a different vessel.
     if(t.cultivationReference?.kind==='target'){t.systemMode='same';delete t.cultivation;delete t.cultivationReference;}
@@ -284,6 +311,14 @@ function renderTransfer(){
   for(const [i,t] of d.targets.entries())bindSourcePicker($('#transfer-dialog'),{scope:'target-'+i,options:replateCellSourceOptions(t,chosen),getSelectionMode:()=>d.sourceSelectionMode||'group',getSelected:()=>new Set(t.sourceKeys),lockedKeys:t.locked?t.sourceKeys:[],canEdit:()=>transferDraft===d&&!busy&&!t.locked,onChange:keys=>setTransferTargetSourceSelection(i,keys),onViewChange:id=>{t.sourceViewId=id;renderTransfer();}});
   document.querySelectorAll('[data-target-grid]').forEach(grid=>{
     const index=Number(grid.dataset.targetGrid), target=d.targets[index];
+    if(target.anchorPlaceMode&&grid.classList.contains('is-anchor-place')){
+      grid.onclick=event=>{
+        const btn=event.target?.closest?.('[data-well]');
+        if(!btn||btn.disabled||busy)return;
+        placeReplateAtAnchor(index,btn.dataset.well);
+      };
+      return;
+    }
     let previewWells=null;
     bindWellSelection(grid,{touchRange:true,
       getSelected:()=>new Set(previewWells||target.wells),

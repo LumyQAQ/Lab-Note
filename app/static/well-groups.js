@@ -6,6 +6,12 @@ let wellGroupDraft=null;
 function wellGroupFor(container,well){
   return (container?.well_groups||[]).find(group=>group.wells.includes(well))||null;
 }
+// Derive the color from the saved group ID so removing or reordering other groups keeps it stable.
+function wellGroupColorIndex(group){
+  let hash=0;
+  for(const char of String(group.id))hash=(hash*31+char.charCodeAt(0))>>>0;
+  return hash%8;
+}
 function wellGroupActiveMembers(container,group){
   if(container?.status==='archived')return [];
   return (group?.wells||[]).filter(key=>{const w=container?.wells?.[key];return w&&String(w.cell||'').trim()&&w.member_status!=='archived';});
@@ -39,12 +45,19 @@ function defaultWellGroupName(container,keys){
   return cells.length===1?cells[0].slice(0,120):keys.length?'培养组':'';
 }
 let expandedWellGroupBoard='';
-function wellGroupControlsMarkup(container,readonly){
-  if(!boot.layouts[container.type])return '';
+function wellGroupToolsMarkup(container,readonly){
+  if(!boot.layouts[container.type]||readonly)return '';
+  return `<section class="well-group-controls" aria-label="培养组选择"><div class="well-group-tools"><span class="well-selection-switch" role="group" aria-label="培养组选择范围">${[['group','整组'],['single','单孔']].map(([mode,label])=>`<button type="button" data-well-selection-mode="${mode}" aria-pressed="${wellSelectionMode===mode}" class="${wellSelectionMode===mode?'active':''}">${label}</button>`).join('')}</span><button type="button" class="button secondary well-group-add" id="bind-well-group">＋ 新增培养组</button></div></section>`;
+}
+function wellGroupDirectoryMarkup(container,readonly){
+  if(!boot.layouts[container.type]||!container.well_groups?.length)return '';
   const scope=JSON.stringify([container.id,frozen?.id||'']);
   const ungrouped=availableWellGroupMembers(container).length;
   if(expandedWellGroupBoard!==scope)expandedWellGroupBoard='';
-  return `<section class="well-group-controls" aria-label="培养组选择">${!readonly?`<div class="well-group-tools"><span class="well-selection-switch" role="group" aria-label="培养组选择范围">${[['group','整组'],['single','单孔']].map(([mode,label])=>`<button type="button" data-well-selection-mode="${mode}" aria-pressed="${wellSelectionMode===mode}" class="${wellSelectionMode===mode?'active':''}">${label}</button>`).join('')}</span><button type="button" class="button secondary well-group-add" id="bind-well-group">＋ 新增培养组</button></div>`:''}${container.well_groups?.length?`<details class="well-group-directory" data-group-directory="${esc(scope)}" ${expandedWellGroupBoard===scope?'open':''}><summary><strong>培养组 · ${container.well_groups.length} 组</strong><span>${ungrouped?'未分组 '+ungrouped+' 孔':'全部已分组'}</span></summary><div class="well-group-chips">${container.well_groups.map(group=>`<span class="well-group-chip"><button type="button" data-well-group-select="${esc(group.id)}" aria-pressed="false" title="点击切换此组；按住 Shift 或 Command/Ctrl 可多选"><strong>${esc(group.name)}</strong><small>${group.wells.map(esc).join(' · ')}</small></button>${!readonly?`<button type="button" data-well-group-edit="${esc(group.id)}" class="well-group-edit" aria-label="编辑培养组 ${esc(group.name)}">编辑</button>`:''}</span>`).join('')}</div></details>`:''}</section>`;
+  return `<details class="well-group-directory" data-group-directory="${esc(scope)}" ${expandedWellGroupBoard===scope?'open':''}><summary><strong>培养组 · ${container.well_groups.length} 组</strong><span>${ungrouped?'未分组 '+ungrouped+' 孔':'全部已分组'}</span></summary><div class="well-group-chips">${container.well_groups.map(group=>`<span class="well-group-chip"><button type="button" data-well-group-select="${esc(group.id)}" aria-pressed="false" title="点击切换此组；按住 Shift 或 Command/Ctrl 可多选"><strong><i class="well-group-dot" data-well-group-color="${wellGroupColorIndex(group)}" aria-hidden="true"></i>${esc(group.name)}</strong><small>${group.wells.map(esc).join(' · ')}</small></button>${!readonly?`<button type="button" data-well-group-edit="${esc(group.id)}" class="well-group-edit" aria-label="编辑培养组 ${esc(group.name)}">编辑</button>`:''}</span>`).join('')}</div></details>`;
+}
+function wellGroupControlsMarkup(container,readonly){
+  return wellGroupToolsMarkup(container,readonly)+wellGroupDirectoryMarkup(container,readonly);
 }
 function refreshWellGroupControls(container){
   const button=$('#bind-well-group');
@@ -61,7 +74,7 @@ function bindWellGroupControls(container,readonly,selectKeys){
   document.querySelectorAll('#detail [data-well-selection-mode]').forEach(button=>button.onclick=()=>{
     if(busy||frozen||readonly||!canLeave())return;
     dirty=false;wellSelectionMode=button.dataset.wellSelectionMode;
-    selected=wellSelectionMode==='single'?new Set():wellGroupSelection(container,selected);renderDetail();
+    if(wellSelectionMode==='group')selected=wellGroupSelection(container,selected);renderDetail();
   });
   document.querySelectorAll('#detail [data-well-group-select]').forEach(button=>button.onclick=event=>{
     const group=(container.well_groups||[]).find(g=>g.id===button.dataset.wellGroupSelect);

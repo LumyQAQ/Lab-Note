@@ -42,37 +42,62 @@ function mediumRowsMarkup(key,rows,namespace=''){
     <button type="button" class="text-button medium-remove" data-medium-remove="${key}" data-medium-index="${index}" aria-label="移除第 ${index+1} 项">移除</button>
   </div>`).join('')||'<p class="medium-empty">尚未填写名称与浓度。</p>';
 }
-function recipeLabel(recipe){
-  return mediumDisplayParts(recipe)
-    .filter(([label,value])=>value!=='未记录'&&(label!=='额外成分'||recipe.additives?.length))
-    .map(([label,value])=>label==='基础培养基'?value:label+' '+value).join(' · ');
+function mediumBaseKey(value){
+  const raw=String(value||'').trim().toLowerCase();
+  const compact=raw.replace(/[\s-]+/g,'');
+  return ['rpmi1640','dmem','mem','dmem/f12'].includes(compact)?compact:raw;
 }
-function recipeOptions(recipes){
-  return recipes.map((recipe,index)=>`<option value="${index}">${esc(recipeLabel(recipe))}</option>`).join('');
+function recipeLabel(recipe){
+  const m=mediumDefaults(recipe),parts=[];
+  if(m.fbs!=='')parts.push('FBS '+m.fbs+'%');
+  if(m.hs!=='')parts.push('HS '+m.hs+'%');
+  for(const [key,label] of [['ps','双抗'],['triple','三抗']]){
+    if(m[key]!=='unknown')parts.push(m[key]==='yes'?label:'无'+label);
+  }
+  const ingredients=[...m.cytokines,...m.additives].map(x=>x.name+(x.concentration?' '+x.concentration+' '+x.unit:'（浓度待补）'));
+  parts.push(...ingredients.slice(0,2));
+  if(ingredients.length>2)parts.push('另 '+(ingredients.length-2)+' 项成分');
+  if(m.extra==='yes'&&!m.additives.length)parts.push('额外成分待补');
+  return parts.join(' · ')||'基础培养基';
+}
+function recipeOptions(recipes,base){
+  const choices=recipes.map((r,index)=>({r,index,label:recipeLabel(r)})).filter(x=>!base||mediumBaseKey(x.r.base)===mediumBaseKey(base));
+  return choices.map(x=>{
+    const duplicate=choices.some(y=>y.index!==x.index&&y.label===x.label);
+    const tail=duplicate?[...x.r.cytokines,...x.r.additives].slice(2).map(i=>i.name+' '+i.concentration+' '+i.unit).join('；'):'';
+    return `<option value="${x.index}" title="${esc(mediumSummary(x.r))}">${esc(x.label+(tail?' · '+tail:''))}</option>`;
+  }).join('');
+}
+function recipeBases(recipes){
+  return [...new Map(recipes.filter(r=>r.base).map(r=>[mediumBaseKey(r.base),r.base])).values()];
 }
 function bindCreateRecipe(){
-  const select=$('#create-recipe'),panel=$('#create-recipe-details'),body=$('#create-recipe-fields');
+  const select=$('#create-recipe'),base=$('#create-recipe-base'),panel=$('#create-recipe-details'),body=$('#create-recipe-fields');
   const recipes=boot.medium_recipes||[];
-  select.innerHTML=`<option value="">暂不指定</option>${recipeOptions(recipes)}<option value="custom">填写新配方…</option>`;
-  select.value='';
+  const bases=[...recipeBases(recipes),...mediumNameHistory('bases')].filter((x,i,all)=>all.findIndex(b=>mediumBaseKey(b)===mediumBaseKey(x))===i);
+  base.innerHTML='<option value="">暂不指定</option>'+bases.map((x,i)=>`<option value="${i}">${esc(x)}</option>`).join('')+'<option value="custom">其他基础培养基…</option>';
+  base.value='';
   const render=()=>{
     const active=select.value!=='';
     panel.hidden=!active;
     panel.open=select.value==='custom';
     body.replaceChildren();
     if(!active)return;
-    const medium=select.value==='custom'?mediumDefaults():recipes[Number(select.value)];
+    const medium=select.value==='custom'?mediumDefaults({base:base.value==='custom'?'':bases[Number(base.value)]}):recipes[Number(select.value)];
     body.innerHTML=mediumEditorMarkup([{medium}],null,false,'create-');
     const editor=body.querySelector('.medium-editor');
     bindMediumEditor([{medium}],null,editor,'create-');
     for(const box of editor.querySelectorAll('[data-medium-apply]')){
-      box.checked=true;
-      box.disabled=true;
-      box.closest('.medium-field').classList.add('enabled');
+      box.checked=true;box.disabled=true;box.closest('.medium-field').classList.add('enabled');
     }
   };
-  select.onchange=render;
-  render();
+  base.onchange=()=>{
+    select.disabled=!base.value;
+    select.innerHTML='<option value="">请选择此基础培养基的完整配方</option>'+ (base.value&&base.value!=='custom'?recipeOptions(recipes,bases[Number(base.value)]):'')+'<option value="custom">填写新配方…</option>';
+    select.value=base.value&&(base.value==='custom'||!recipes.some(r=>mediumBaseKey(r.base)===mediumBaseKey(bases[Number(base.value)])))?'custom':'';
+    render();
+  };
+  select.onchange=render;base.onchange();
 }
 function mediumEditorMarkup(wells,defaults=null,force=false,namespace=''){
   const hasDefaults=!!defaults&&Object.keys(defaults).length>0;
@@ -81,7 +106,7 @@ function mediumEditorMarkup(wells,defaults=null,force=false,namespace=''){
   const field=(key,label,control)=>{const {mixed,value}=mediumCommon(wells,key);return `<div class="medium-field" data-medium-section="${key}"><label class="medium-apply"><input type="checkbox" data-medium-apply="${key}">${label}</label>${mixed?'<small class="medium-mixed">多个值 · 勾选后统一替换</small>':''}${control(value)}</div>`;};
   const choice=(key,value)=>`<select id="medium-${key}" data-medium-field="${key}" aria-label="${{ps:'双抗',triple:'三抗',extra:'额外添加'}[key]}">${[['unknown','未记录'],['yes','是'],['no','否']].map(([v,label])=>`<option value="${v}" ${v===value?'selected':''}>${label}</option>`).join('')}</select>`;
   const list=(key,label)=>field(key,label,rows=>`<p class="medium-list-note">${mediumCommon(wells,key).mixed?'所选孔的列表不同；编辑或勾选后，以下整组内容会替换所选孔的列表。':'勾选后保存整组列表；未勾选时保留各孔原记录。'}</p><div data-medium-list="${key}">${mediumRowsMarkup(key,rows)}</div><button type="button" class="text-button medium-add" data-medium-add="${key}">＋ 添加${key==='cytokines'?'细胞因子':'额外成分'}</button>`);
-  const markup=`<section id="medium-editor" class="medium-editor" data-medium-defaulted="${defaulted}" aria-labelledby="medium-heading"><h3 id="medium-heading">培养基组成</h3><p class="medium-help">${defaulted?'已带入本容器默认配方并勾选，可逐项修改；点击保存后才写入。细胞计数不沿用。':'仅保存勾选的项目。已有配方保持原值，空白及“未记录”表示尚未记录。'}</p>${namespace!=='create-'&&boot.medium_recipes?.length?`<label class="recipe-picker">选用完整配方<select data-medium-preset><option value="">选择已保存的完全培养基…</option>${recipeOptions(boot.medium_recipes)}</select></label>`:''}${hasDefaults?'<button type="button" class="text-button" data-medium-reuse>沿用本容器默认配方</button>':''}
+  const markup=`<section id="medium-editor" class="medium-editor" data-medium-defaulted="${defaulted}" aria-labelledby="medium-heading"><h3 id="medium-heading">培养基组成</h3><p class="medium-help">${defaulted?'已带入本容器默认配方并勾选，可逐项修改；点击保存后才写入。细胞计数不沿用。':'仅保存勾选的项目。已有配方保持原值，空白及“未记录”表示尚未记录。'}</p>${namespace!=='create-'&&boot.medium_recipes?.length?`<div class="recipe-picker"><label>按基础培养基查找<select data-medium-preset-base><option value="">请选择基础培养基</option>${recipeBases(boot.medium_recipes).map(base=>`<option value="${esc(base)}">${esc(base)}</option>`).join('')}</select></label><label>选用完整配方<select data-medium-preset disabled><option value="">先选择基础培养基</option></select></label><p class="muted" data-medium-preset-info></p></div>`:''}${hasDefaults?'<button type="button" class="text-button" data-medium-reuse>沿用本容器默认配方</button>':''}
     ${field('base','基础培养基',value=>mediumAutocompleteInput('medium-base','data-medium-field="base" aria-label="基础培养基" placeholder="输入名称或选择历史记录"',value))}
     <div class="medium-pair">${['fbs','hs'].map(key=>field(key,(key==='fbs'?'FBS 胎牛血清':'HS 马血清')+'（%）',value=>`<input id="medium-${key}" data-medium-field="${key}" aria-label="${key.toUpperCase()} 百分比" type="number" min="0" max="100" step="any" inputmode="decimal" placeholder="未记录" value="${esc(value)}">`)).join('')}</div>
     <div class="medium-pair">${field('ps','双抗 P/S',value=>choice('ps',value))}${field('triple','三抗',value=>choice('triple',value))}</div>
@@ -155,7 +180,15 @@ function bindMediumEditor(wells,defaults=null,root=$('#medium-editor'),namespace
   }
   const picker=root.querySelector('[data-medium-preset]');
   if(picker){
-    const recipes=boot.medium_recipes;
+    const recipes=boot.medium_recipes,filter=root.querySelector('[data-medium-preset-base]');
+    filter.onchange=()=>{
+      picker.innerHTML='<option value="">请选择完整配方</option>'+(filter.value?recipeOptions(recipes,filter.value):'');
+      root.querySelector('[data-medium-preset-info]').textContent=filter.value?'选择配方后可核对所有成分。':'';
+      picker.value='';picker.disabled=!filter.value;
+    };
+    const currentBase=mediumCommon(wells,'base').value;
+    filter.value=recipeBases(recipes).find(b=>mediumBaseKey(b)===mediumBaseKey(currentBase))||'';
+    filter.onchange();
     picker.onchange=()=>{
       if(picker.value==='')return;
       const recipe=mediumDefaults(recipes[Number(picker.value)]);
@@ -165,6 +198,7 @@ function bindMediumEditor(wells,defaults=null,root=$('#medium-editor'),namespace
       root.querySelectorAll('.medium-mixed').forEach(note=>note.remove());
       root.querySelector('[data-medium-extra-content]').hidden=recipe.extra!=='yes';
       implicitClear=false;
+      root.querySelector('[data-medium-preset-info]').textContent='已带入所选配方，可在下方核对全部成分。';
       picker.value='';
     };
   }

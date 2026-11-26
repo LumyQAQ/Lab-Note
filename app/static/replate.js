@@ -52,13 +52,23 @@ function confirmReplateCellGroup(index){
   toggleTransferTargetLock(index);
   if(t.locked){toast('当前细胞已确认，可继续添加同板其他细胞，最后统一预览保存。');$(`[data-target-card="${index}"]`)?.scrollIntoView?.({block:'start',behavior:'smooth'});}
 }
-function addReplateCellGroup(index,chosenKeys=null){
+function addReplateCellGroup(index,chosenKeys=null,options={}){
   const d=transferDraft,t=d?.targets[index];if(busy||!d||!isCultureMode(d.mode)||!t?.locked)return;
   const pending=d.targets.findIndex(group=>!group.locked);
   if(pending>=0){toast('请先完成当前待确认的一组。');$(`[data-target-card="${pending}"]`)?.scrollIntoView?.({block:'start',behavior:'smooth'});return;}
   if(!replateRemainingCellSources(t).length)return toast('本板已无尚未安排的细胞，可查看总预览并保存。');
   const ids=t.cellSourceIds||[...new Set(t.sourceKeys.map(k=>d.sources[k]?.id).filter(Boolean))];
-  d.targets.push({ref:t.ref,wells:[],sourceKeys:[],distribution:'paired',append:false,treatment:'',concentration:'',systemMode:'same',locked:false,replateAuto:false,continueCellGroup:true,cellSourceIds:ids,sourceViewId:t.sourceViewId||ids[0],addedSourceKeys:[]});
+  let ref=t.ref;
+  const useNewPlate=!!options.newPlate;
+  if(useNewPlate){
+    const prev=transferTarget(t.ref);
+    const type=prev?.type||'T25';
+    const quantity=prev?groupQuantity(prev):1;
+    const baseName=(prev?.name||'新容器').replace(/\s*·\s*第\s*\d+\s*板$/,'');
+    ref='new-'+(++transferSerial);
+    d.newContainers.push({key:ref,type,quantity,name:`${baseName} · 第 ${d.newContainers.length+1} 板`,location:prev?.location||current()?.location||''});
+  }
+  d.targets.push({ref,wells:[],sourceKeys:[],distribution:'paired',append:false,treatment:'',concentration:'',systemMode:'same',locked:false,replateAuto:useNewPlate,continueCellGroup:true,cellSourceIds:ids,sourceViewId:t.sourceViewId||ids[0],addedSourceKeys:[]});
   d.nextSourceTarget=null;
   if(chosenKeys?.size)setTransferTargetSourceSelection(d.targets.length-1,chosenKeys);
   else{invalidateTransfer();renderTransfer();}
@@ -109,21 +119,135 @@ function initializeReplate(){
   for(const c of d.newContainers)if(!d.smartCulture&&c.name.endsWith(' · 后代'))c.name=c.name.slice(0,-5)+' · 移孔换液';
   for(const t of d.targets){t.distribution||='paired';t.replateAuto??=!!transferTarget(t.ref)?.key;syncReplateTarget(t);}
 }
+function replatePlateCoord(well){
+  const m=/^([A-Z])(\d+)$/.exec(String(well||''));
+  return m?[m[1].charCodeAt(0)-65,+m[2]-1]:null;
+}
+function replateCoordKey(row,col){
+  return String.fromCharCode(65+row)+(col+1);
+}
+function replateSourceGeometry(sourceKeys){
+  const d=transferDraft;if(!d||!sourceKeys?.length)return null;
+  const ordered=transferSourceOrder(sourceKeys),items=[],seen=new Set();
+  let containerId=null;
+  for(const key of ordered){
+    const s=d.sources[key];if(!s)return null;
+    if(containerId===null)containerId=s.id;
+    else if(containerId!==s.id)return null;
+    const coord=replatePlateCoord(s.well);if(!coord)return null;
+    if(seen.has(s.well))return null;
+    seen.add(s.well);
+    items.push({key,well:s.well,r:coord[0],c:coord[1]});
+  }
+  const src=state.containers.find(c=>c.id===containerId);
+  if(!src||!boot.layouts[src.type])return null;
+  const rows=items.map(x=>x.r),cols=items.map(x=>x.c);
+  const minR=Math.min(...rows),maxR=Math.max(...rows),minC=Math.min(...cols),maxC=Math.max(...cols);
+  return {id:containerId,items,minR,maxR,minC,maxC,spanR:maxR-minR+1,spanC:maxC-minC+1};
+}
+function replateTranslatedPlacement(geom,dims,anchorRow,anchorCol){
+  if(!geom||!dims)return null;
+  const [tRows,tCols]=dims;
+  const map={},wells=[];
+  for(const item of geom.items){
+    const tr=anchorRow+(item.r-geom.minR),tc=anchorCol+(item.c-geom.minC);
+    if(tr<0||tr>=tRows||tc<0||tc>=tCols)return null;
+    const key=replateCoordKey(tr,tc);
+    map[item.key]=key;
+    wells.push(key);
+  }
+  return {wells,map,anchor:replateCoordKey(anchorRow,anchorCol),anchorRow,anchorCol};
+}
+function replateAutoRelativePlacement(t,targetContainer){
+  const geom=replateSourceGeometry(t.sourceKeys);
+  const dims=targetContainer&&boot.layouts[targetContainer.type];
+  if(!geom||!dims)return null;
+  const [tRows,tCols]=dims;
+  if(geom.spanR>tRows||geom.spanC>tCols)return null;
+  const otherTaken=new Set(transferDraft.targets.filter(o=>o!==t&&o.ref===t.ref).flatMap(o=>o.wells));
+  const isClean=p=>!!p&&p.wells.every(w=>!otherTaken.has(w)&&!targetContainer.wells?.[w]?.cell);
+  const clampR=Math.min(geom.minR,tRows-geom.spanR),clampC=Math.min(geom.minC,tCols-geom.spanC);
+  const candidates=[[geom.minR,geom.minC],[clampR,clampC]];
+  if(tRows>=geom.spanR+1&&tCols>=geom.spanC+1)candidates.push([1,1]);
+  candidates.push([0,0]);
+  const seen=new Set();
+  const tryAnchor=(r,c)=>{
+    const tag=r+','+c;if(seen.has(tag))return null;seen.add(tag);
+    return replateTranslatedPlacement(geom,dims,r,c);
+  };
+  let fallback=null;
+  for(const [r,c] of candidates){
+    const p=tryAnchor(r,c);
+    if(!p)continue;
+    if(!fallback)fallback=p;
+    if(isClean(p))return {...p,shifted:r!==geom.minR||c!==geom.minC};
+  }
+  for(let r=0;r<=tRows-geom.spanR;r++){
+    for(let c=0;c<=tCols-geom.spanC;c++){
+      const p=tryAnchor(r,c);
+      if(isClean(p))return {...p,shifted:r!==geom.minR||c!==geom.minC};
+    }
+  }
+  return fallback?{...fallback,shifted:fallback.anchorRow!==geom.minR||fallback.anchorCol!==geom.minC}:null;
+}
+function replateExactTranslationMap(sourceKeys,nextWells,targetContainer){
+  if(!sourceKeys?.length||nextWells.length!==sourceKeys.length)return null;
+  const geom=replateSourceGeometry(sourceKeys),dims=boot.layouts[targetContainer?.type];
+  if(!geom||!dims)return null;
+  const coords=nextWells.map(replatePlateCoord);
+  if(coords.some(x=>!x))return null;
+  const minTR=Math.min(...coords.map(x=>x[0])),minTC=Math.min(...coords.map(x=>x[1]));
+  const placed=replateTranslatedPlacement(geom,dims,minTR,minTC);
+  if(!placed)return null;
+  const targetSet=new Set(nextWells);
+  return placed.wells.length===targetSet.size&&placed.wells.every(w=>targetSet.has(w))?placed.map:null;
+}
+function placeReplateAtAnchor(index,anchorWell){
+  const d=transferDraft,t=d?.targets[index];if(!t||busy)return;
+  try{assertTransferTargetEditable(index);}catch(e){return toast(e.message,true);}
+  const c=transferTarget(t.ref),coord=replatePlateCoord(anchorWell);
+  if(!c||!coord)return;
+  const placed=replateTranslatedPlacement(replateSourceGeometry(t.sourceKeys),boot.layouts[c.type],coord[0],coord[1]);
+  if(!placed){
+    toast(`以 ${anchorWell} 为左上角会超出目标孔板边界，请向左或向上选择起点。`,true);
+    return;
+  }
+  const before=captureTargetSelection(t);
+  t.wells=[...placed.wells];
+  t.replateMap=placed.map;
+  t.replateAuto=false;
+  t.anchorPlaceMode=false;
+  if(d.mode==='replate')updateReplateDistributions();
+  if(t.distribution==='pooled')delete t.replateMap;
+  invalidateTransfer();renderTransfer();promptOccupiedSelection(index,before);
+  toast(`已按相对位置放入 ${placed.wells.length} 孔（起点 ${anchorWell}）。`);
+}
 function syncReplateTarget(t,force=false){
-  if(transferDraft.mode!=='replate'||t.locked)return;
-  const c=transferTarget(t.ref);if(!c)return;
+  if(transferDraft.mode!=='replate'||t.locked)return null;
+  const c=transferTarget(t.ref);if(!c)return null;
   const sources=transferSourceOrder(t.sourceKeys),valid=transferTargetKeys(c);
-  if(!force&&t.distributionOverride==='paired'&&t.replateMap){
+  if(!force&&t.replateAuto===false&&t.distributionOverride==='paired'&&t.replateMap){
     t.replateMap=Object.fromEntries(sources.map(key=>[key,valid.includes(t.replateMap[key])?t.replateMap[key]:'']));
-    t.wells=[...new Set(Object.values(t.replateMap).filter(Boolean))];return;
+    t.wells=[...new Set(Object.values(t.replateMap).filter(Boolean))];return null;
   }
   if(!force&&(!c.key||t.replateAuto===false)){
-    setReplateTargetWells(t,t.wells.filter(k=>valid.includes(k)));return;
+    setReplateTargetWells(t,t.wells.filter(k=>valid.includes(k)));return null;
   }
   const keys=sources.map(k=>transferDraft.sources[k]?.well);
   const sameCoordinates=keys.length===new Set(keys).size&&keys.every(k=>valid.includes(k));
-  t.wells=sameCoordinates?keys:groupType(c.type)?valid.slice(0,keys.length):[];
+  if(sameCoordinates){
+    t.wells=keys;t.replateAuto=true;
+    t.replateMap=Object.fromEntries(sources.map((key,i)=>[key,keys[i]]));
+    return {wells:keys,shifted:false};
+  }
+  if(boot.layouts[c.type]){
+    const rel=replateAutoRelativePlacement(t,c);
+    if(rel){t.wells=[...rel.wells];t.replateMap=rel.map;t.replateAuto=true;return rel;}
+    t.wells=[];t.replateAuto=true;delete t.replateMap;return null;
+  }
+  t.wells=groupType(c.type)?valid.slice(0,keys.length):[];
   t.replateAuto=true;delete t.replateMap;
+  return {wells:t.wells,shifted:false};
 }
 function replatePairs(t,strict=true){
   if(t.distribution==='pooled')return [];
@@ -140,6 +264,7 @@ function setReplateTargetWells(t,nextWells){
   const next=[...nextWells],c=transferTarget(t.ref),valid=c?transferTargetKeys(c):[];
   if(new Set(next).size!==next.length)throw new Error('目标孔位重复，请选择不同目标。');
   if(next.some(k=>!valid.includes(k)))throw new Error('目标孔位已变化，请重新选择。');
+  const oldWells=[...t.wells];
   const oldPairs=transferDraft.mode==='replate'?replatePairs(t,false):[];
   t.wells=next;t.replateAuto=false;
   if(transferDraft.mode!=='replate')return;
@@ -148,8 +273,13 @@ function setReplateTargetWells(t,nextWells){
     delete t.replateMap;
     return;
   }
-  const used=new Set(),map={};
   const sources=transferSourceOrder(t.sourceKeys);
+  const wellsChanged=next.length!==oldWells.length||next.some(k=>!oldWells.includes(k));
+  if(wellsChanged){
+    const translated=replateExactTranslationMap(sources,next,c);
+    if(translated){t.replateMap=translated;return;}
+  }
+  const used=new Set(),map={};
   for(const {key,well} of oldPairs){
     if(next.includes(well)&&!used.has(well)){map[key]=well;used.add(well);}
   }
@@ -260,6 +390,11 @@ function bindReplateControls(){
   });
   document.querySelectorAll('[data-replate-confirm]').forEach(b=>b.onclick=()=>confirmReplateCellGroup(+b.dataset.replateConfirm));
   document.querySelectorAll('[data-replate-next]').forEach(b=>b.onclick=()=>addReplateCellGroup(+b.dataset.replateNext));
+  document.querySelectorAll('[data-replate-next-new]').forEach(b=>b.onclick=()=>addReplateCellGroup(+b.dataset.replateNextNew,null,{newPlate:true}));
+  document.querySelectorAll('[data-replate-anchor]').forEach(b=>b.onclick=()=>{
+    const i=+b.dataset.replateAnchor,t=transferDraft?.targets[i];if(busy||!t||t.locked)return;
+    t.anchorPlaceMode=!t.anchorPlaceMode;renderTransfer();
+  });
   const edit=(index,fn)=>{if(busy)return;try{assertTransferTargetEditable(index);const before=captureTargetSelection(transferDraft.targets[index]);fn();invalidateTransfer();renderTransfer();promptOccupiedSelection(index,before);}catch(e){toast(e.message,true);renderTransfer();}};
   document.querySelectorAll('[data-replate-details]').forEach(panel=>panel.ontoggle=()=>{
     if(panel.isConnected)transferDraft.targets[+panel.dataset.replateDetails].mappingOpen=panel.open;
@@ -272,7 +407,10 @@ function bindReplateControls(){
     setReplateTargetWells(t,t.wells);
   }));
   document.querySelectorAll('[data-replate-same]').forEach(b=>b.onclick=()=>edit(+b.dataset.replateSame,()=>{
-    const t=transferDraft.targets[+b.dataset.replateSame];t.distributionOverride='paired';t.mappingOpen=true;syncReplateTarget(t,true);
+    const t=transferDraft.targets[+b.dataset.replateSame];t.distributionOverride='paired';t.mappingOpen=true;t.anchorPlaceMode=false;
+    const placed=syncReplateTarget(t,true);
+    if(placed?.shifted)toast(`来源孔位超出目标孔板边界，已按相对位置移入 ${placed.wells.join('、')}，也可点“按相对位置整组放置”自选起点。`);
+    else if(!placed&&t.sourceKeys.length&&boot.layouts[transferTarget(t.ref)?.type])toast('来源整组跨度超出目标孔板尺寸，请分批或手动选择目标孔位。',true);
   }));
   document.querySelectorAll('[data-replate-reset]').forEach(b=>b.onclick=()=>edit(+b.dataset.replateReset,()=>{
     const t=transferDraft.targets[+b.dataset.replateReset];t.distributionOverride='paired';t.mappingOpen=true;delete t.replateMap;t.replateAuto=false;

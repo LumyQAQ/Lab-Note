@@ -11,12 +11,12 @@
 
 | 系统 | 下载 | 启动 |
 | --- | --- | --- |
-| Windows 10 / 11 x64 | [1.2.1-preview.1 预览版 ZIP](https://github.com/LumyQAQ/Lab-Note/releases/download/v1.2.1-preview.1/Lab-Note-1.2.1-preview.1-Windows-x64.zip) | 全部解压后双击 `Start-Lab-Note.cmd`，已附 Python |
-| macOS | [1.2.1 正式版 ZIP](docs/downloads/lab-note-v1.2.1.zip) | 安装 Python 3.9+，双击「启动实验日记.command」 |
+| Windows 10 / 11 x64 | [1.3.0-preview.1 预览版 ZIP](https://github.com/LumyQAQ/Lab-Note/releases/download/v1.3.0-preview.1/Lab-Note-1.3.0-preview.1-Windows-x64.zip) | 全部解压后双击 `Start-Lab-Note.cmd`，已附 Python |
+| macOS | [1.3.0 正式版 ZIP](docs/downloads/lab-note-v1.3.0.zip) | 安装 Python 3.9+，双击「启动实验日记.command」 |
 
 ## 本次更新
 
-填写体积、质量、浓度和时长时，可以直接选择常用单位，也可以输入自定义单位。体积可选 μL、mL、L 和 nL。切换单位会保留已填数值，不会自动换算。
+新增冻存库存，可按设备、架、盒和格位查找冻存管，记录入库、移动、出库及污染标记。培养总览支持直接补液，配方可按基础培养基筛选。跨规格孔板可按原相对位置分板，保存时支持重复请求去重和多窗口冲突提示。
 
 ## Windows 本机预览版
 
@@ -32,7 +32,7 @@
 
 默认优先使用 8875，端口冲突时自动改用空闲端口。要切换运行中服务的端口，先执行 `Stop-Lab-Note.cmd`。记录和日志位于 `%LOCALAPPDATA%\Lab Note`。可双击 `Check-Lab-Note.cmd` 用临时库自检。
 
-主分支包含两平台的共用源码。Windows 预览版附件见 [v1.2.1-preview.1](https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.2.1-preview.1)。
+主分支包含两平台的共用源码。Windows 预览版附件见 [v1.3.0-preview.1](https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.3.0-preview.1)。
 <!-- repository-only:end -->
 
 [软件署名及发布校验](AUTHORS.md)
@@ -59,6 +59,7 @@
 | 每日培养 | 标记容器和孔位、记录 Day 0、培养基、计数、换液或半换液，核对后仍可编辑 |
 | 传代与扩孔 | 保存来源到目标孔的对应关系，支持一份来源分到多个条件组 |
 | 实验记录 | 流式、Western Blot / 蛋白提取与 BCA、PCR / qPCR、ELISA、发光检测及通用处理观察，可关联细胞来源和原始文件索引 |
+| 冻存库存 | 建立设备、架、盒和格位，定位冻存批次，登记移位、取出、弃置和污染复核 |
 | 配制与库存 | 登记药物和试剂的配制、分装与存储 |
 | 历史追溯 | 查询追加操作与快照，撤销最近变更，导出日记、CSV 和数据库备份 |
 

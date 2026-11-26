@@ -118,6 +118,9 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
                                     'undo':store.undo_info(),'workday':store.workday(),
                                     'lab_schema':load_schema(),
                                     'data_dir':str(store.directory), 'last_backup':backups[0].name if backups else None})
+                elif path == '/api/command-status':
+                    request_id = parse_qs(parsed.query).get('request_id', [''])[0]
+                    self.send(200, store.command_status(request_id))
                 elif path == '/api/snapshots':
                     self.send(200, store.snapshots())
                 elif path == '/api/lab/schema':
@@ -193,7 +196,7 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
                         archive.writestr('original-file.sha256', backup.with_suffix('.sha256').read_text().split()[0]+'  culture.sqlite3\n')
                         archive.writestr('恢复说明.txt', '数据库含完整当前记录、操作历史和每日快照。\n将 culture.sqlite3 放入新的恢复目录；运行 python3 server.py --data-dir /恢复目录 --port 8890 验证。不要覆盖正在使用的数据库。完整步骤见程序 README.md。')
                     self.send(200, buffer.getvalue(), 'application/zip', name.replace('.sqlite3','.zip'))
-                elif path in ['/', '/index.html', '/groups.js', '/well-groups.js', '/well-groups.css', '/assay-groups.js', '/manual-groups.js', '/manual-groups.css', '/app.js', '/style.css', '/selection.js', '/source-picker.js', '/source-picker.css', '/replate.js', '/replate.css', '/quick-medium.js', '/quick-medium.css', '/transfer.js', '/transfer-cards.js', '/occupied-targets.js', '/occupied-targets.css', '/archived-cultures.js', '/archived-cultures.css', '/lineage-links.js', '/relocation.js', '/relocation.css', '/autocomplete.js', '/medium.js', '/medium.css','/count.js','/count.css','/workday.js','/workday.css','/home.js','/home.css','/experiments.js','/experiments.css','/result-paste.js']:
+                elif path in ['/', '/index.html', '/groups.js', '/well-groups.js', '/well-groups.css', '/assay-groups.js', '/manual-groups.js', '/manual-groups.css', '/app.js', '/style.css', '/selection.js', '/source-picker.js', '/source-picker.css', '/replate.js', '/replate.css', '/quick-medium.js', '/quick-medium.css', '/transfer.js', '/transfer-cards.js', '/occupied-targets.js', '/occupied-targets.css', '/archived-cultures.js', '/archived-cultures.css', '/lineage-links.js', '/relocation.js', '/relocation.css', '/autocomplete.js', '/medium.js', '/medium.css','/count.js','/count.css','/workday.js','/workday.css','/home.js','/home.css','/experiments.js','/experiments.css','/result-paste.js', '/cryo-storage.js', '/cryo-storage.css']:
                     file = ROOT / 'static' / ('index.html' if path == '/' else path[1:])
                     self.send(200, file.read_bytes(), (mimetypes.guess_type(file)[0] or 'text/plain') + '; charset=utf-8')
                 else:
@@ -224,7 +227,8 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
                     self.server.shutdown()
                     return
                 if self.path == '/api/command':
-                    state = store.mutate(data.get('action'), data.get('payload', {}), data.get('revision'))
+                    state = store.mutate(data.get('action'), data.get('payload', {}), data.get('revision'),
+                                         client_request_id=data.get('client_request_id'))
                     result={'state':state,'undo':store.undo_info(),'workday':store.workday(),
                             'medium_recipes':store.medium_recipes()}
                     if data.get('action')=='undo':
@@ -247,7 +251,7 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
                 else:
                     self.send(404, {'error':'操作不存在'})
             except Conflict as error:
-                self.send(409, {'error':str(error)})
+                self.send(409, {'error':str(error), 'conflict':error.conflict})
             except (ValueError, KeyError, TypeError) as error:
                 self.send(400, {'error':str(error)})
             except Exception:
