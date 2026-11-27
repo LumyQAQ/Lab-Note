@@ -10,9 +10,8 @@ import xml.etree.ElementTree as ET
 import zipfile
 from functools import wraps
 from threading import RLock
-from zoneinfo import ZoneInfo
+from platform_config import TZ
 
-TZ = ZoneInfo('Asia/Shanghai')
 ROOT = Path(__file__).resolve().parent
 BUILTIN_TEMPLATES_DIR = ROOT / 'templates'
 MAX_TEMPLATE_BYTES = 10 * 1024 * 1024  # 10 MB
