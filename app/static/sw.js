@@ -1,6 +1,6 @@
 'use strict';
 
-const cacheName = 'lab-note-shell-v1.5.2';
+const cacheName = 'lab-note-shell-v1.6.0';
 // Only public files in the distributed application. Navigations (including / and /pair)
 // and data requests always reach the server and its authentication checks.
 const shell = new Set([

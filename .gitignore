@@ -144,8 +144,8 @@
 !/app/static/pair.html
 !/app/static/vendor/qrcodegen.js
 !/app/static/sw.js
-!/docs/downloads/lab-note-v1.5.2.zip
-!/docs/downloads/lab-note-v1.5.2.zip.sig
+!/docs/downloads/lab-note-v1.6.0.zip
+!/docs/downloads/lab-note-v1.6.0.zip.sig
 !/tests/test_mobile_access.py
 !/tests/test_mobile_tls.py
 !/tests/test_mobile_ui.cjs

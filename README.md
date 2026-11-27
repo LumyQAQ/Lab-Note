@@ -11,8 +11,8 @@
 
 | 系统 | 下载 | 启动 |
 | --- | --- | --- |
-| Windows 10 / 11 x64 | [1.5.2-preview.1 预览版 ZIP](https://github.com/LumyQAQ/Lab-Note/releases/download/v1.5.2-preview.1/Lab-Note-1.5.2-preview.1-Windows-x64.zip) | 全部解压后双击 `Start-Lab-Note.cmd`，已附 Python |
-| macOS | [1.5.2 正式版 ZIP](docs/downloads/lab-note-v1.5.2.zip) | 安装 Python 3.9+，双击「启动实验日记.command」 |
+| Windows 10 / 11 x64 | [1.6.0-preview.1 预览版 ZIP](https://github.com/LumyQAQ/Lab-Note/releases/download/v1.6.0-preview.1/Lab-Note-1.6.0-preview.1-Windows-x64.zip) | 全部解压后双击 `Start-Lab-Note.cmd`，已附 Python |
+| macOS | [1.6.0 正式版 ZIP](docs/downloads/lab-note-v1.6.0.zip) | 安装 Python 3.9+，双击「启动实验日记.command」 |
 
 ## 本次更新
 
@@ -32,7 +32,7 @@
 
 默认优先使用 8875，端口冲突时自动改用空闲端口。要切换运行中服务的端口，先执行 `Stop-Lab-Note.cmd`。记录和日志位于 `%LOCALAPPDATA%\Lab Note`。可双击 `Check-Lab-Note.cmd` 用临时库自检。
 
-主分支包含两平台的共用源码。Windows 预览版附件见 [v1.5.2-preview.1](https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.5.2-preview.1)。
+主分支包含两平台的共用源码。Windows 预览版附件见 [v1.6.0-preview.1](https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.6.0-preview.1)。
 <!-- repository-only:end -->
 
 [软件署名及发布校验](AUTHORS.md)
@@ -92,6 +92,6 @@ python3 -m unittest discover -s tests -v
 
 ## 备份与恢复
 
-从旧版升级前，可在旧版的「数据与备份」下载 ZIP 并留存。1.5.2 可以读取旧库。写入压缩历史后，恢复到 1.4.0 需要使用升级前备份。
+从旧版升级前，可在旧版的「数据与备份」下载 ZIP 并留存。1.6.0 可以读取旧库。写入压缩历史后，恢复到 1.4.0 需要使用升级前备份。
 
 在「数据与备份」下载 ZIP。解压后，可在解压目录运行 `shasum -a 256 -c original-file.sha256` 核对数据库。将 `culture.sqlite3` 放到单独的恢复目录，用 `python3 app/server.py --data-dir "恢复目录" --port 8890` 打开核验。

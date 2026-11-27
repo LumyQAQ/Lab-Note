@@ -30,9 +30,9 @@ jobs:
         shell: pwsh
         env:
           PREFLIGHT: ${{ inputs.source_preflight }}
-          ASSET: Lab-Note-1.5.2-preview.1-Windows-x64.zip
-          VERSION: v1.5.2-preview.1
-          EXPECTED_SHA256: 6fa6907aab2ed3d9c8e4cac8ff19bd92490b0c2ce84ddaf3a52e15c7aa6e8884
+          ASSET: Lab-Note-1.6.0-preview.1-Windows-x64.zip
+          VERSION: v1.6.0-preview.1
+          EXPECTED_SHA256: b87c436ada21c11b137ad85ce59d6d394ab87c025dd60df96490bc496ef26c44
         run: |
           $ErrorActionPreference = 'Stop'
           $assetUrl = "https://github.com/LumyQAQ/Lab-Note/releases/download/$env:VERSION/$env:ASSET"

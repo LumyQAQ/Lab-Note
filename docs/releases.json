@@ -1,6 +1,6 @@
 [
   {
-    "version": "1.5.2",
+    "version": "1.6.0",
     "date": "2026-11-27",
     "title": "跨设备配对共享、移动端主屏幕与深色孔位",
     "highlights": [
@@ -9,14 +9,14 @@
       "修复关闭的移动抽屉和遮罩拦截点击，以及深色模式下整组/单孔按钮、8 组培养孔与不同内容类型孔位的配色。"
     ],
     "mac": {
-      "tag": "v1.5.2",
-      "release_url": "https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.5.2",
-      "download_url": "https://github.com/LumyQAQ/Lab-Note/releases/download/v1.5.2/lab-note-v1.5.2.zip"
+      "tag": "v1.6.0",
+      "release_url": "https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.6.0",
+      "download_url": "https://github.com/LumyQAQ/Lab-Note/releases/download/v1.6.0/lab-note-v1.6.0.zip"
     },
     "win": {
-      "tag": "v1.5.2-preview.1",
-      "release_url": "https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.5.2-preview.1",
-      "download_url": "https://github.com/LumyQAQ/Lab-Note/releases/download/v1.5.2-preview.1/Lab-Note-1.5.2-preview.1-Windows-x64.zip"
+      "tag": "v1.6.0-preview.1",
+      "release_url": "https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.6.0-preview.1",
+      "download_url": "https://github.com/LumyQAQ/Lab-Note/releases/download/v1.6.0-preview.1/Lab-Note-1.6.0-preview.1-Windows-x64.zip"
     }
   },
   {
