@@ -26,3 +26,6 @@
 @media(min-width:1600px){.home-page-compact .home-container-grid{grid-template-columns:repeat(auto-fill,minmax(270px,1fr))}}
 @media(max-width:620px){.home-page-compact .home-container-grid{grid-template-columns:minmax(0,1fr)}.home-vessel-compact svg{width:48px;height:36px}}
 @media(max-width:520px){.home-card-actions{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+.home-badges { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:4px; }
+.home-status.is-active { background:#eaf1e7; color:#436849; border-color:#dae7d7; }

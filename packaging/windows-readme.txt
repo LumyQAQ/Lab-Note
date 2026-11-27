@@ -1,5 +1,5 @@
 Lab Note · 实验笔记
-Windows x64 本地预览版 1.5.0-preview.1
+Windows x64 本地预览版 1.5.1-preview.1
 软件作者：LumyQAQ    https://github.com/LumyQAQ
 本包仅供本地试用。GitHub v1.0.0 为之前发布的版本。
 

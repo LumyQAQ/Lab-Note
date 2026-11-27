@@ -114,7 +114,7 @@ function homeContainerMarkup(c) {
   const occupied = homeOccupied(c), wells = occupied.map(([,w]) => w);
   const checked = c.checked_date === boot.today, active = c.status === 'active';
   const compact=homeDensity==='compact';
-  const heading=`<header><div>${compact?'':`<span class="home-type">${esc(groupTypeLabel(c))}</span>`}<h3><button type="button" class="home-name" data-home-open="${esc(c.id)}" aria-label="打开 ${esc(c.name)} 的培养记录">${esc(c.name)}</button></h3></div><span class="home-status ${active&&checked?'checked':''}">${!active?'已结束':checked?'今日已核对':'今日待核对'}</span></header>`;
+  const heading=`<header><div>${compact?'':`<span class="home-type">${esc(groupTypeLabel(c))}</span>`}<h3><button type="button" class="home-name" data-home-open="${esc(c.id)}" aria-label="打开 ${esc(c.name)} 的培养记录">${esc(c.name)}</button></h3></div><div class="home-badges">${active?`<span class="home-status is-active">在培养</span><span class="home-status ${checked?'checked is-info':'is-pending'}">${checked?'今日已核对':'今日待核对'}</span>`:'<span class="home-status">已结束</span>'}</div></header>`;
   if(compact){
     const cells=homeCellNames(wells),days=[...new Set(wells.map(homeDay))];
     const bases=[...new Set(wells.map(w=>w.medium?.base).filter(Boolean))];
@@ -134,7 +134,7 @@ function homeContainerMarkup(c) {
 function homeExperimentMarkup(group) {
   const vessels = [...new Map(group.members.map(m => [m.container.id,m.container])).values()];
   const active = vessels.filter(c => group.members.some(m=>m.container.id===c.id&&homeMemberActive(m))).length;
-  return `<article class="home-experiment"><div class="home-experiment-head"><div><span class="home-type">关联实验编号</span><h3>${esc(group.id)}</h3></div><span class="home-status ${active?'checked':''}">${active?'相关培养进行中':'相关培养均已结束'}</span></div><p class="home-cells">${esc(homeCellNames(group.members.map(m => m.well)).join(' · '))}</p><p class="home-experiment-count">${vessels.length} 个容器 · ${group.members.length} 个培养单元 <span>${active} 个在培养${homeStatus==='active'?'':' / '+(vessels.length-active)+' 个已结束'}</span></p><div class="home-members">${vessels.map(c => {
+  return `<article class="home-experiment"><div class="home-experiment-head"><div><span class="home-type">关联实验编号</span><h3>${esc(group.id)}</h3></div><span class="home-status ${active?'checked is-active':''}">${active?'相关培养进行中':'相关培养均已结束'}</span></div><p class="home-cells">${esc(homeCellNames(group.members.map(m => m.well)).join(' · '))}</p><p class="home-experiment-count">${vessels.length} 个容器 · ${group.members.length} 个培养单元 <span>${active} 个在培养${homeStatus==='active'?'':' / '+(vessels.length-active)+' 个已结束'}</span></p><div class="home-members">${vessels.map(c => {
     const members=group.members.filter(m => m.container.id === c.id);
     return `<button type="button" data-home-member="${esc(c.id)}" data-home-experiment="${esc(group.id)}"><strong>${esc(c.name)}</strong><span>${esc(members.map(m => groupMemberLabel(c,m.key)).join(' · '))}</span><small>${esc(groupTypeLabel(homeStatus==='active'?homeActiveSummary(c):c))} · ${members.some(homeMemberActive)?'在培养':'已结束'} ↗</small></button>`;
   }).join('')}</div><button type="button" class="home-open" data-home-group="${esc(group.id)}">打开实验相关记录 <span aria-hidden="true">↗</span></button></article>`;

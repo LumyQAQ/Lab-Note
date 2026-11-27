@@ -337,3 +337,7 @@
   .cryo-slot { min-height: 52px; padding: 4px 3px; }
   .cryo-slot-cell { font-size: 10.5px; }
 }
+
+.cryo-batch-card .state-badge { display:inline-block; padding:2px 7px; border:1px solid transparent; border-radius:8px; }
+.state-badge.is-contam { background:#fde2df; color:#8f1d14; }
+.state-badge.is-clean-verified { background:#e6f4ea; color:#236136; }

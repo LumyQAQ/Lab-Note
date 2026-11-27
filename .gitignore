@@ -131,3 +131,6 @@
 !/tests/test_update_check.py
 !/tests/test_storage.py
 !/tests/test_cryo_browser.cjs
+!/docs/downloads/lab-note-v1.5.1.zip
+!/docs/downloads/lab-note-v1.5.1.zip.sig
+!/tests/test_dark_mode_browser.cjs

@@ -10,9 +10,9 @@ jobs:
       - name: Verify the published x64 ZIP and exercise its real CMD entry points
         shell: pwsh
         env:
-          ASSET: Lab-Note-1.5.0-preview.1-Windows-x64.zip
-          VERSION: v1.5.0-preview.1
-          EXPECTED_SHA256: e6c87b51c78fe7b9a1c7f02c932d8ce34f1f1ef3efa272c80fadd240331aab01
+          ASSET: Lab-Note-1.5.1-preview.1-Windows-x64.zip
+          VERSION: v1.5.1-preview.1
+          EXPECTED_SHA256: e0433d885ac044ff857b226174c657a3711835e4c5fb32406377304a96d223e1
         run: |
           $ErrorActionPreference = 'Stop'
           $assetUrl = "https://github.com/LumyQAQ/Lab-Note/releases/download/$env:VERSION/$env:ASSET"

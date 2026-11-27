@@ -1949,8 +1949,9 @@ function cryoBatchesMarkup() {
       ${rem > 0 ? `<button type="button" class="button secondary" data-withdraw-lot="${esc(f.id)}">登记取出</button>` : ''}
       ${(state.frozen_withdrawals || []).filter(w => w.lot_id === f.id).map(w => `<p>${esc(w.at.replace('T', ' '))} · ${w.discarded ? '弃置' : w.mode === 'thaw' ? '取出复苏' : '取出'} ${esc(w.vials)} 管
         ${w.notes ? ' · ' + esc(w.notes) : ''}${w.medium ? ' · 培养基 ' + esc(mediumSummary(w.medium)) : ''}
-        ${w.clean_verification ? ' · 已核对无污染 ' + esc(w.clean_verification.at) + ' ' + esc(w.clean_verification.notes || '') : ''}
-        ${w.contamination?.cleared_by_clean_thaw ? ' · 黄色预警已通过复苏记录解除 ' + esc(w.contamination.cleared_by_clean_thaw.at) : ''}
+        ${w.contamination && !w.contamination.cleared_by_clean_thaw ? ` <span class="state-badge is-contam">⚠ 已标污染${w.contamination.kind ? ' · ' + esc(w.contamination.kind) : ''}</span>` : ''}
+        ${w.clean_verification ? ' <span class="state-badge is-clean-verified">已核对无污染</span> ' + esc(w.clean_verification.at) + ' ' + esc(w.clean_verification.notes || '') : ''}
+        ${w.contamination?.cleared_by_clean_thaw ? ' <span class="state-badge is-clean-verified">黄色预警已通过复苏记录解除</span> ' + esc(w.contamination.cleared_by_clean_thaw.at) : ''}
         ${cryoCanClearYellowWithWithdrawal(w.id, risks, byId) ? `<button type="button" class="text-button" data-clear-by-withdrawal="${esc(w.id)}">核对复苏记录并解除黄色预警</button>` : ''}
         <button type="button" class="text-button" data-flag-withdrawal="${esc(w.id)}">${w.contamination ? '查看 / 修改污染标记' : '标记污染'}</button></p>`).join('')}
       <p>冻存管编号：${esc(f.labels || '未记录')}</p>

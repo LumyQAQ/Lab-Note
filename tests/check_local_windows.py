@@ -40,7 +40,7 @@ def main():
             installed = (ROOT/'VERSION').read_text(encoding='ascii').strip()
             with http.open(base+'/api/version',timeout=8) as response:
                 assert json.load(response)['version']==installed==boot['app_version']
-            assert installed=='1.5.0-preview.1', installed
+            assert installed=='1.5.1-preview.1', installed
             cli=subprocess.check_output(command+['--version'],cwd=ROOT,encoding='utf-8')
             assert installed in cli, cli
             with http.open(base+'/api/storage-stats',timeout=8) as response:
