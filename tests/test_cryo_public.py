@@ -137,3 +137,98 @@ class CryoInventoryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.run_command('batch_update', lot_id=lot_id, at='2020-01-04')
         self.assertEqual(self.db.state(), state)
+
+    def test_numbered_clones_templates_and_print(self):
+        from cryo_storage import render_box_print_html, stock_group_remaining_map
+        s = self.run_command('setup_preset', device_name='<Device>', rows=2, cols=2, numbering='numeric')
+        box = s['cryo_storage']['boxes'][0]['id']
+        slots = [dict(box_id=box, slot=k) for k in ['4', '1']]
+        stock = dict(name='<Sample>', at='2020-01-01', vials=2, placements=slots, labels='one,two',
+                     per_vial_count={'coefficient': '3.20', 'exponent': '-1', 'unit': 'user units'})
+        for seq in [{'start': True}, {'start': -1}, [], {'start': 100000}]:
+            with self.assertRaises(ValueError):
+                self.run_command('stock_create', **stock, subclone_sequence=seq)
+        self.assertEqual(self.db.state(), s)
+        s = self.run_command('stock_create', **stock, subclone_sequence={'prefix': 'C<', 'start': 0})
+        lots = s['frozen_batches']
+        self.assertEqual([(x['subclone'], x['labels']) for x in lots], [('C<0', 'one'), ('C<1', 'two')])
+        mapping = s['cryo_storage']['boxes'][0]['slots']
+        self.assertEqual([mapping[k]['batch_id'] for k in ['4', '1']], [x['id'] for x in lots])
+        self.assertEqual(stock_group_remaining_map(s), {x['id']: 1 for x in lots})
+        sheet = render_box_print_html(s, box)
+        for part in ['&lt;Device&gt;', '&lt;Sample&gt;', 'C&lt;0', '未记录', '剩1', 'A4 landscape']:
+            self.assertIn(part, sheet)
+        self.assertNotIn('<Sample>', sheet)
+        self.assertNotIn('WT', sheet)
+        with self.assertRaises(ValueError):
+            render_box_print_html(s, 'missing')
+        s = self.run_command('template_save', **stock, label='My template', subclone='C<0')
+        tmpl = s['cryo_storage']['templates'][0]
+        self.assertEqual(tmpl['per_vial_count'], stock['per_vial_count'])
+        self.assertEqual(tmpl['subclone'], 'C<0')
+        s = self.run_command('template_save', name='Updated', label='MY TEMPLATE')
+        self.assertEqual([t['id'] for t in s['cryo_storage']['templates']], [tmpl['id']])
+        s = self.run_command('template_delete', id=tmpl['id'])
+        self.assertEqual(s['cryo_storage']['templates'], [])
+        with self.assertRaises(ValueError):
+            self.run_command('delete_slots', slots=[slots[0], slots[0]])
+        self.assertEqual(self.db.state(), s)
+        s = self.run_command('delete_slots', slots=[slots[0]])
+        self.assertEqual([x['id'] for x in s['frozen_batches']], [lots[1]['id']])
+        self.assertFalse(s.get('frozen_withdrawals'))
+        self.assertEqual(set(s['cryo_storage']['boxes'][0]['slots']), {'1'})
+
+    def test_risk_window_clearance_and_recorded_thaw_medium(self):
+        from cryo_storage import contamination_risk_map, stock_group_remaining_map
+        base = dict(name='Example', at='2020-01-01', vials=4, storage_stage='unassigned',
+                    subclone='C', passage='P3', resistance_tags=['Custom'])
+        lots = {}
+        variants = {
+            'source': {}, 'peer': {}, 'edge': {'at': '2020-01-31'},
+            'late': {'at': '2020-02-01'}, 'lower': {'at': '2020-01-02', 'passage': 'P2'},
+            'different_tag': {'at': '2020-01-02', 'resistance_tags': ['Other']},
+            'different_clone': {'subclone': 'other'}, 'explicit_wt': {'special_treatments': ['WT']},
+        }
+        for key, fields in variants.items():
+            s = self.run_command('stock_create', **{**base, **fields})
+            lots[key] = s['frozen_batches'][-1]['id']
+        groups = stock_group_remaining_map(s)
+        self.assertNotEqual(groups[lots['source']], groups[lots['explicit_wt']])
+        s = self.run_command('discard_vials', lot_id=lots['source'], vials=1, at='2020-02-02', is_contamination=True)
+        old = s['frozen_withdrawals'][-1]
+        risks = contamination_risk_map(s)
+        self.assertEqual({k for k, lid in lots.items() if risks[lid]['level'] != 'none'}, {'source', 'edge', 'peer'})
+        with self.assertRaises(ValueError):
+            self.run_command('clear_yellow_by_thaw', withdrawal_id=old['id'])
+        recipe = {'base': 'User recipe', 'extra': 'yes',
+                  'additives': [{'name': 'User entry', 'concentration': '0.070', 'unit': 'user units'}]}
+        with self.assertRaises(ValueError):
+            self.run_command('withdraw_vials', lot_id=lots['peer'], vials=1, mode='take', medium=recipe)
+        self.assertEqual(self.db.state(), s)
+        s = self.run_command('withdraw_vials', lot_id=lots['edge'], vials=1, mode='thaw', at='2020-02-03')
+        with self.assertRaises(ValueError):
+            self.run_command('clear_yellow_by_thaw', withdrawal_id=s['frozen_withdrawals'][-1]['id'])
+        s = self.run_command('withdraw_vials', lot_id=lots['peer'], vials=1, mode='thaw', at='2020-02-03', medium=recipe)
+        clean = s['frozen_withdrawals'][-1]
+        self.assertEqual(clean['medium']['additives'], recipe['additives'])
+        s = self.run_command('discard_vials', lot_id=lots['source'], vials=1, at='2020-02-03', is_contamination=True)
+        self.assertEqual(contamination_risk_map(s)[lots['peer']]['level'], 'red')
+        with self.assertRaises(ValueError):
+            self.run_command('clear_yellow_by_thaw', withdrawal_id=clean['id'])
+        self.run_command('mark_contamination', withdrawal_id=s['frozen_withdrawals'][-1]['id'], clear=True)
+        s = self.run_command('clear_yellow_by_thaw', withdrawal_id=clean['id'], at='2020-02-04')
+        self.assertTrue(all(info['level'] == 'none' for info in contamination_risk_map(s).values()))
+        records = {w['id']: w for w in s['frozen_withdrawals']}
+        self.assertEqual(records[old['id']]['contamination']['cleared_by_clean_thaw']['withdrawal_id'], clean['id'])
+        self.assertEqual(records[clean['id']]['clean_verification']['clears_withdrawal_ids'], [old['id']])
+
+    def test_slot_correction_retains_prior_withdrawal_history(self):
+        s = self.run_command('setup_preset', device_name='Box', rows=1, cols=2)
+        slots = [dict(box_id=s['cryo_storage']['boxes'][0]['id'], slot=k) for k in ['A1', 'A2']]
+        s = self.run_command('stock_create', name='Sample', at='2020-01-01', vials=2, placements=slots)
+        lid = s['frozen_batches'][0]['id']
+        s = self.run_command('withdraw_vials', lot_id=lid, vials=1, mode='thaw', slots=[slots[0]])
+        history = s['frozen_withdrawals']
+        s = self.run_command('delete_slots', slots=[slots[1]])
+        self.assertEqual(s['frozen_withdrawals'], history)
+        self.assertEqual((s['frozen_batches'][0]['id'], s['frozen_batches'][0]['vials']), (lid, 1))

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="manifest" href="/notebook.webmanifest"><link rel="apple-touch-icon" href="/notebook-256.png"><meta name="theme-color" content="#285b46"><meta name="author" content="LumyQAQ"><title>Lab Note · 细胞培养工作台</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/relocation.css"><link rel="stylesheet" href="/cryo-storage.css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="manifest" href="/notebook.webmanifest"><link rel="apple-touch-icon" href="/notebook-256.png"><meta name="theme-color" content="#285b46"><meta name="author" content="LumyQAQ"><script src="/theme.js"></script><title>Lab Note · 细胞培养工作台</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/relocation.css"><link rel="stylesheet" href="/cryo-storage.css"></head>
 <body>
 <aside class="sidebar">
   <a class="brand" href="/"><span class="brand-mark">c<span>·</span></span><span>LAB<br><strong>NOTE</strong></span></a>
@@ -9,8 +9,9 @@
   <div class="sidebar-bottom"><span class="status-dot"></span> 仅保存在本机<br><small>Lab Note · 本机版</small></div>
 </aside>
 <main>
-  <header class="topbar"><div><span class="eyebrow">LABORATORY NOTEBOOK</span><h1>Lab Note 实验笔记</h1><small class="product-credit">软件作者 <a rel="author noopener" href="https://github.com/LumyQAQ" target="_blank">LumyQAQ</a></small></div><div class="header-utilities"><div class="today-date" id="today-date"></div><button type="button" class="button secondary" id="undo-last" disabled>↶ 撤销上一步</button></div></header>
+  <header class="topbar"><div><span class="eyebrow">LABORATORY NOTEBOOK</span><h1>Lab Note 实验笔记</h1><small class="product-credit">软件作者 <a rel="author noopener" href="https://github.com/LumyQAQ" target="_blank">LumyQAQ</a></small></div><div class="header-utilities"><button type="button" class="button secondary theme-toggle" id="theme-toggle" aria-label="深色模式" aria-pressed="false" title="切换到深色模式">🌙 深色</button><div class="today-date" id="today-date"></div><button type="button" class="button secondary" id="undo-last" disabled>↶ 撤销上一步</button></div></header>
   <div id="connection" class="connection" hidden></div>
+  <div id="update-banner" class="update-banner" role="status" hidden></div>
   <div id="content" aria-live="polite"></div>
 </main>
 <dialog id="cryo-dialog" class="transfer-dialog" aria-label="冻存库存操作"></dialog>
@@ -66,5 +67,6 @@
 <link rel="stylesheet" href="/archived-cultures.css">
 <script src="/archived-cultures.js"></script>
 <script src="/cryo-storage.js"></script>
+<link rel="stylesheet" href="/theme-dark.css">
 <script src="/app.js"></script>
 </body></html>

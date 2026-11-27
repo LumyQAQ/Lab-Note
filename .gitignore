@@ -118,3 +118,16 @@
 !/docs/downloads/lab-note-v1.4.0.zip
 !/docs/downloads/lab-note-v1.4.0.zip.sig
 !/tests/test_cryo_filters.cjs
+!/app/state_codec.py
+!/app/static/theme.js
+!/app/static/theme-dark.css
+!/app/static/cryo-print.js
+!/docs/downloads/lab-note-v1.5.0.zip
+!/docs/downloads/lab-note-v1.5.0.zip.sig
+!/VERSION
+!/更新培养工作台.command
+!/app/update_check.py
+!/app/mac_update.py
+!/tests/test_update_check.py
+!/tests/test_storage.py
+!/tests/test_cryo_browser.cjs

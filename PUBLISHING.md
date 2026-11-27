@@ -16,3 +16,5 @@
 Windows 与 macOS 共用主分支的应用源码。Windows 预览包由 `packaging/build_windows_local.py` 使用校验过的 Python x64 嵌入包构建，以 GitHub Release 的预发布附件分发。两平台分别签署 ZIP，并在 Windows 附件发布后运行仓库的 Windows 自检工作流。
 
 新增单位字段时，按物理量配置多个常用选项，并保留自定义输入。修改表单后运行 `node tests/test_unit_choices.cjs`，检查空白工作台各实验表单的单位选项。
+
+发布前在仓库根目录运行 `python3 -B -m unittest discover -s tests` 和 `node --test tests/*.cjs`。安装 playwright-core 后，可设置 `LAB_NOTE_BROWSER_TEST=1`、`LAB_NOTE_BROWSER_EXECUTABLE` 和 `LAB_NOTE_APP_ROOT`，对解压后的下载包运行冻存库存浏览器测试。

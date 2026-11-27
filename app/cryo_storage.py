@@ -4,12 +4,13 @@ from datetime import datetime
 import re
 import uuid
 
-from medium import number, text
+from medium import merge_medium, number, text
 from platform_config import TZ
 
 DEVICE_KINDS = ('ln2', 'minus80', 'custom')
 NUMBERING_MODES = ('alpha', 'numeric')
 STORAGE_STAGES = ('gradient', 'stored', 'unassigned')
+CONTAMINATION_PROPAGATION_DAYS = 30
 
 
 def ensure_cryo_storage(state):
@@ -17,6 +18,7 @@ def ensure_cryo_storage(state):
     storage.setdefault('devices', [])
     storage.setdefault('racks', [])
     storage.setdefault('boxes', [])
+    storage.setdefault('templates', [])
     return storage
 
 
@@ -89,6 +91,7 @@ def normalize_optional_fields(payload, *, existing=None):
     special_treatments = (normalize_tags(payload['special_treatments'], '特殊处理标签', 80)
                           if 'special_treatments' in payload
                           else list(base.get('special_treatments') or []))
+    subclone = text(payload['subclone'], '亚克隆 / 克隆号', 60) if 'subclone' in payload else (base.get('subclone') or '')
     passage = text(payload['passage'], '细胞代次', 60) if 'passage' in payload else (base.get('passage') or '')
     donor = text(payload['donor'], '细胞供者来源', 200) if 'donor' in payload else (base.get('donor') or '')
     suggested_vessel = (text(payload['suggested_vessel'], '复苏容器备注', 120)
@@ -108,6 +111,7 @@ def normalize_optional_fields(payload, *, existing=None):
         'resistance_tags': resistance_tags,
         'special_treatments': special_treatments,
         'passage': passage,
+        'subclone': subclone,
         'donor': donor,
         'suggested_vessel': suggested_vessel,
         'per_vial_count': per_vial_count,
@@ -243,6 +247,107 @@ def _split_labels_for_slots(labels_text, count):
     if len(parts) == count and len({p.casefold() for p in parts}) == count:
         return parts
     return [''] * count
+
+
+def _norm_cell(lot):
+    return (lot.get('name') or '').strip().casefold()
+
+
+def _norm_treatments(lot):
+    return tuple(sorted({tag.strip().casefold() for tag in lot.get('special_treatments') or [] if tag.strip()}))
+
+
+def _same_donor_compatible(a, b):
+    da = (a.get('donor') or '').strip().casefold()
+    db = (b.get('donor') or '').strip().casefold()
+    return not da or not db or da == db
+
+
+def relation_tier(anchor, other):
+    if not _norm_cell(anchor) or _norm_cell(anchor) != _norm_cell(other):
+        return None
+    if not _same_donor_compatible(anchor, other):
+        return None
+    same_tx = _norm_treatments(anchor) == _norm_treatments(other)
+    sa = (anchor.get('subclone') or '').strip().casefold()
+    sb = (other.get('subclone') or '').strip().casefold()
+    same_clone = (sa == sb)
+    if same_tx and same_clone and (anchor.get('at') or '')[:10] == (other.get('at') or '')[:10]:
+        return 'strong'
+    if same_tx and same_clone:
+        return 'weak'
+    return 'weaker'
+
+
+def _parse_passage_num(lot):
+    m = re.fullmatch(r'[Pp]?\s*(\d+)', (lot.get('passage') or '').strip())
+    return int(m.group(1)) if m else None
+
+
+def _resistance_compatible(src, other):
+    ra = {t.strip().casefold() for t in (src.get('resistance_tags') or []) if t and t.strip()}
+    rb = {t.strip().casefold() for t in (other.get('resistance_tags') or []) if t and t.strip()}
+    return not ra or not rb or bool(ra & rb)
+
+
+def _within_contamination_window(src_at, other_at):
+    if not src_at or not other_at or other_at <= src_at:
+        return False
+    try:
+        d1 = datetime.fromisoformat(src_at[:10])
+        d2 = datetime.fromisoformat(other_at[:10])
+    except ValueError:
+        return False
+    delta = (d2 - d1).days
+    return 0 <= delta <= CONTAMINATION_PROPAGATION_DAYS
+
+
+def contamination_risk_map(state):
+    batches = state.get('frozen_batches', [])
+    by_id = {b['id']: b for b in batches}
+    events = [
+        w for w in state.get('frozen_withdrawals', [])
+        if isinstance(w.get('contamination'), dict) and not w['contamination'].get('cleared_by_clean_thaw')
+    ]
+    result = {b['id']: {'level': 'none', 'hits': 0, 'events': []} for b in batches}
+    for w in events:
+        src = by_id.get(w.get('lot_id'))
+        if not src:
+            continue
+        src_cell = _norm_cell(src)
+        src_at = src.get('at') or ''
+        src_p = _parse_passage_num(src)
+        for b in batches:
+            is_strong = (b['id'] == src['id']) or (relation_tier(src, b) == 'strong')
+            b_p = _parse_passage_num(b)
+            passage_ok = (src_p is None or b_p is None or b_p >= src_p)
+            is_later_same = (
+                bool(src_cell)
+                and _norm_cell(b) == src_cell
+                and _same_donor_compatible(src, b)
+                and _resistance_compatible(src, b)
+                and passage_ok
+                and _within_contamination_window(src_at, b.get('at') or '')
+            )
+            if not (is_strong or is_later_same):
+                continue
+            reason = '同批次/强相关复苏污染' if is_strong else f'冻存后 {CONTAMINATION_PROPAGATION_DAYS} 天内同类型细胞风险'
+            info = result[b['id']]
+            info['hits'] += 1
+            info['events'].append({
+                'withdrawal_id': w['id'],
+                'source_lot_id': src['id'],
+                'source_name': src['name'],
+                'source_at': src_at,
+                'contamination': w['contamination'],
+                'reason': reason,
+            })
+    for info in result.values():
+        if info['hits'] >= 2:
+            info['level'] = 'red'
+        elif info['hits'] == 1:
+            info['level'] = 'yellow'
+    return result
 
 
 # --- Commands ---
@@ -493,8 +598,10 @@ def _stock_source(state, source):
     well = (container or {}).get('wells', {}).get(key)
     if not well or not well.get('cell'):
         raise ValueError('请选择已有培养记录的来源容器与单元')
-    return [{'id': source_id, 'well': key, 'name': container['name'],
-             'snapshot': {field: well.get(field, '') for field in ('cell', 'kind', 'day0', 'batch')}}]
+    snapshot = {field: well.get(field, '') for field in ('cell', 'kind', 'day0', 'batch')}
+    if well.get('medium'):
+        snapshot['medium'] = deepcopy(well['medium'])
+    return [{'id': source_id, 'well': key, 'name': container['name'], 'snapshot': snapshot}]
 
 
 def apply_cryo_stock_create(state, payload, now):
@@ -542,8 +649,17 @@ def apply_cryo_stock_create(state, payload, now):
     else:
         sources = _stock_source(state, payload.get('source'))
         refs = []
-    lot = {
-        'id': 'FRZ-' + uuid.uuid4().hex[:16].upper(),
+    sequence = payload.get('subclone_sequence')
+    if sequence is not None:
+        if not isinstance(sequence, dict):
+            raise ValueError('批量亚克隆序号配置格式无效')
+        if len(parsed_placements) < 2 or len(parsed_placements) != vials:
+            raise ValueError('按格位分别生成独立亚克隆时，需至少选中 2 个空位且选中格数等于总管数')
+        prefix = text(sequence.get('prefix', '#'), '亚克隆前缀', 40)
+        first = sequence.get('start', 1)
+        if type(first) is not int or not 0 <= first <= 99999:
+            raise ValueError('亚克隆起始序号须为 0–99999 的整数')
+    common = {
         'name': name,
         'at': at,
         'vials': vials,
@@ -559,25 +675,33 @@ def apply_cryo_stock_create(state, payload, now):
         **({'gradient_entered_at': at} if stage == 'gradient' else {}),
         **meta,
     }
-    state.setdefault('frozen_batches', []).append(lot)
-    if parsed_placements:
-        auto_labels = _split_labels_for_slots(labels, len(parsed_placements))
-        for item, auto_label in zip(parsed_placements, auto_labels):
+    auto_labels = _split_labels_for_slots(labels, len(parsed_placements))
+    placements = [(item, item['vial_label'] or label) for item, label in zip(parsed_placements, auto_labels)]
+    groups = [[placed] for placed in placements] if sequence is not None else [placements]
+    created = []
+    for index, group in enumerate(groups):
+        lot = {**deepcopy(common), 'id': 'FRZ-' + uuid.uuid4().hex[:16].upper()}
+        if sequence is not None:
+            lot.update(vials=1, subclone=f'{prefix}{first + index}', labels=group[0][1])
+        state.setdefault('frozen_batches', []).append(lot)
+        for item, label in group:
             item['box'].setdefault('slots', {})[item['slot']] = {
-                'batch_id': lot['id'],
-                'vial_label': item['vial_label'] or auto_label,
-                'placed_at': now[:16],
+                'batch_id': lot['id'], 'vial_label': label, 'placed_at': now[:16],
             }
-    refresh_batch_location(state, lot)
-    return {
-        'lot_id': lot['id'],
-        'name': lot['name'],
+        refresh_batch_location(state, lot)
+        created.append(lot)
+    result = {
+        'lot_id': created[0]['id'],
+        'name': name,
         'vials': vials,
-        'placed': len(parsed_placements),
+        'placed': len(placements),
         'at': at,
-        'storage_stage': lot['storage_stage'],
-        'location': lot['location'],
+        'storage_stage': created[0]['storage_stage'],
+        'location': '；'.join(lot['location'] for lot in created if lot['location'])[:500],
     }
+    if sequence is not None:
+        result.update(lot_ids=[lot['id'] for lot in created], subclones=[lot['subclone'] for lot in created])
+    return result
 
 
 def apply_cryo_place_vials(state, payload, now):
@@ -855,6 +979,11 @@ def _remove_vials(state, payload, now, *, mode):
     is_contamination = mode == 'discard' and payload.get('is_contamination') is True
     contam_kind = text(payload.get('contamination_kind', ''), '污染类型', 80) if is_contamination else ''
     notes = text(payload.get('notes', ''), '备注', 500)
+    medium = None
+    if 'medium' in payload:
+        if mode != 'thaw':
+            raise ValueError('仅复苏出库支持登记培养基配方')
+        medium = merge_medium(None, payload['medium'])
     released = []
     for box, skey in to_release:
         entry = box['slots'].pop(skey)
@@ -870,6 +999,8 @@ def _remove_vials(state, payload, now, *, mode):
         **({'discarded': True, 'discard_reason': reason} if mode == 'discard' else {}),
         'recorded_at': now,
     }
+    if medium is not None:
+        item['medium'] = medium
     if released:
         item['slots'] = released
     if from_gradient:
@@ -886,6 +1017,7 @@ def _remove_vials(state, payload, now, *, mode):
     refresh_batch_location(state, lot)
     return {
         'withdrawal_id': item['id'],
+        **({'medium': medium} if medium is not None else {}),
         'lot_id': lot_id,
         'name': lot['name'],
         'vials': n,
@@ -910,6 +1042,373 @@ def apply_cryo_withdraw_vials(state, payload, now):
     return _remove_vials(state, payload, now, mode=mode)
 
 
+def apply_cryo_delete_slots(state, payload, now):
+    """Remove mistaken slot entries directly without creating a withdrawal or contamination event."""
+    storage = ensure_cryo_storage(state)
+    raw_slots = payload.get('slots')
+    if not isinstance(raw_slots, list) or not 1 <= len(raw_slots) <= 200:
+        raise ValueError('请选择 1–200 个要删除的已占格位')
+    boxes_by_id = {b['id']: b for b in storage['boxes']}
+    lots_by_id = {b['id']: b for b in state.get('frozen_batches', [])}
+    seen = set()
+    targets = []
+    for spec in raw_slots:
+        if not isinstance(spec, dict):
+            raise ValueError('待删除格位格式无效')
+        bid = text(spec.get('box_id', ''), '冻存盒编号', 120)
+        skey = text(spec.get('slot', ''), '格位坐标', 20)
+        box = boxes_by_id.get(bid)
+        if not box or skey not in box.get('slots', {}):
+            raise ValueError(f'格位 {skey} 不存在或已空')
+        if (bid, skey) in seen:
+            raise ValueError('待删除格位重复')
+        seen.add((bid, skey))
+        entry = box['slots'][skey]
+        lot = lots_by_id.get(entry.get('batch_id'))
+        targets.append((box, skey, entry, lot))
+
+    counts_by_lot = {}
+    removed_snapshots = []
+    for box, skey, entry, lot in targets:
+        box['slots'].pop(skey)
+        removed_snapshots.append(slot_snapshot(storage, box, skey, entry))
+        if lot:
+            counts_by_lot[lot['id']] = counts_by_lot.get(lot['id'], 0) + 1
+
+    removed_lot_ids = []
+    names = []
+    for lot_id, n in counts_by_lot.items():
+        lot = lots_by_id[lot_id]
+        names.append(lot['name'])
+        lot['vials'] -= n
+        has_withdrawals = bool(batch_withdrawals(state, lot_id))
+        if lot['vials'] <= 0 and not has_withdrawals:
+            state['frozen_batches'] = [b for b in state.get('frozen_batches', []) if b['id'] != lot_id]
+            removed_lot_ids.append(lot_id)
+        else:
+            refresh_batch_location(state, lot)
+
+    return {
+        'deleted': len(removed_snapshots),
+        'names': list(dict.fromkeys(names)),
+        'slots': removed_snapshots,
+        'removed_lot_ids': removed_lot_ids,
+    }
+
+
+def apply_cryo_clear_yellow_by_thaw(state, payload, now):
+    """Clear a yellow (1-hit) contamination warning when a clean thaw of the same / strong-related batch confirms no contamination."""
+    wid = text(payload.get('withdrawal_id', ''), '复苏记录编号', 120)
+    withdrawals = state.get('frozen_withdrawals', [])
+    w_clean = next((w for w in withdrawals if w['id'] == wid), None)
+    if not w_clean:
+        raise ValueError('找不到该复苏记录')
+    if w_clean.get('discarded'):
+        raise ValueError('弃置记录不能用于无污染复苏验证')
+    if isinstance(w_clean.get('contamination'), dict):
+        raise ValueError('该复苏记录本身已标记污染，不能用于解除预警')
+    if w_clean.get('mode') != 'thaw' and not isinstance(w_clean.get('destination'), dict):
+        raise ValueError('请使用已登记复苏培养的同批次记录来确认无污染')
+    by_id = {b['id']: b for b in state.get('frozen_batches', [])}
+    clean_lot = by_id.get(w_clean.get('lot_id'))
+    if not clean_lot:
+        raise ValueError('找不到对应的冻存批次')
+    risks = contamination_risk_map(state)
+    info = risks.get(clean_lot['id']) or {'level': 'none', 'hits': 0, 'events': []}
+    if info['level'] == 'red':
+        raise ValueError('当前为红色高危（≥2 次污染），不能仅凭单次复苏无污染直接解除')
+    if info['level'] != 'yellow':
+        raise ValueError('该批次当前没有待解除的黄色污染预警')
+    at = text(payload.get('at', '') or now[:16], '确认时间', 40)
+    if len(at) == 10 and re.fullmatch(r'\d{4}-\d{2}-\d{2}', at):
+        at = at + 'T00:00'
+    try:
+        stamp = datetime.fromisoformat(at)
+    except ValueError:
+        raise ValueError('请填写有效的确认时间') from None
+    if len(at) < 16 or at[10] != 'T' or stamp.tzinfo is not None or stamp.replace(tzinfo=TZ) > datetime.fromisoformat(now):
+        raise ValueError('确认时间须为已发生的北京时间')
+    if at < w_clean['at']:
+        raise ValueError('确认时间不能早于复苏时间')
+    notes = text(payload.get('notes', ''), '无污染确认备注', 1000)
+
+    # Match the active contamination event(s) from the same batch or strong-related same-day peer
+    target_wids = []
+    for ev in info['events']:
+        src_lot = by_id.get(ev['source_lot_id'])
+        if not src_lot:
+            continue
+        if src_lot['id'] == clean_lot['id'] or relation_tier(src_lot, clean_lot) == 'strong':
+            if at < ev['contamination'].get('at', ''):
+                raise ValueError('确认时间不能早于污染发现时间')
+            target_wids.append(ev['withdrawal_id'])
+    if not target_wids:
+        raise ValueError('仅支持通过同批次（或同日强相关批次）的复苏无污染记录来解除黄色预警')
+
+    cleared_wids = []
+    for w in withdrawals:
+        if w['id'] in target_wids and isinstance(w.get('contamination'), dict):
+            w['contamination']['cleared_by_clean_thaw'] = {
+                'withdrawal_id': w_clean['id'],
+                'lot_id': clean_lot['id'],
+                'at': at,
+                'notes': notes,
+                'recorded_at': now,
+            }
+            cleared_wids.append(w['id'])
+    w_clean['clean_verification'] = {
+        'at': at,
+        'notes': notes,
+        'clears_withdrawal_ids': cleared_wids,
+        'recorded_at': now,
+    }
+    return {
+        'withdrawal_id': w_clean['id'],
+        'lot_id': clean_lot['id'],
+        'name': clean_lot['name'],
+        'at': at,
+        'notes': notes,
+        'cleared_withdrawal_ids': cleared_wids,
+    }
+
+
+def apply_cryo_template_save(state, payload, now):
+    """Save or update a reusable cryo cell entry template."""
+    storage = ensure_cryo_storage(state)
+    name = text(payload.get('name', ''), '细胞名称', 200)
+    if not name:
+        raise ValueError('保存模板前请填写细胞名称')
+    meta = normalize_optional_fields(payload)
+    default_label_parts = [name]
+    if meta['resistance_tags']:
+        default_label_parts.append('/'.join(meta['resistance_tags'][:2]))
+    elif meta['special_treatments']:
+        default_label_parts.append('/'.join(meta['special_treatments'][:1]))
+    label = text(payload.get('label', ''), '模板名称', 120) or ' '.join(default_label_parts)[:120]
+    notes = text(payload.get('notes', ''), '默认备注', 1000)
+    tid = text(payload.get('id', ''), '模板编号', 120)
+    templates = storage['templates']
+    existing = next((t for t in templates if tid and t['id'] == tid), None)
+    if existing is None:
+        existing = next((t for t in templates if t.get('label', '').casefold() == label.casefold()), None)
+    data = {
+        'label': label,
+        'name': name,
+        'cell_kind': meta['cell_kind'],
+        'special_treatments': meta['special_treatments'],
+        'resistance_tags': meta['resistance_tags'],
+        'donor': meta['donor'],
+        'suggested_vessel': meta['suggested_vessel'],
+        'per_vial_count': meta['per_vial_count'],
+        'passage': meta['passage'],
+        'subclone': meta['subclone'],
+        'notes': notes,
+        'updated_at': now,
+    }
+    if existing is not None:
+        existing.update(data)
+        return {'template_id': existing['id'], 'label': existing['label'], 'name': existing['name'], 'change': 'update'}
+    if len(templates) >= 50:
+        raise ValueError('最多保存 50 个常用细胞模板，请先删除不再使用的模板')
+    tpl = {'id': 'CRYOT-' + uuid.uuid4().hex[:10].upper(), 'created_at': now, **data}
+    templates.append(tpl)
+    return {'template_id': tpl['id'], 'label': tpl['label'], 'name': tpl['name'], 'change': 'create'}
+
+
+def apply_cryo_template_delete(state, payload, now):
+    storage = ensure_cryo_storage(state)
+    tid = text(payload.get('id', ''), '模板编号', 120)
+    tpl = next((t for t in storage['templates'] if t['id'] == tid), None)
+    if not tpl:
+        raise ValueError('找不到该常用细胞模板')
+    storage['templates'].remove(tpl)
+    return {'template_id': tid, 'label': tpl.get('label') or tpl.get('name') or tid}
+
+
+def _stock_group_key(lot):
+    return (
+        _norm_cell(lot),
+        _norm_treatments(lot),
+        tuple(sorted(t.strip().casefold() for t in (lot.get('resistance_tags') or []) if t.strip())),
+        (lot.get('subclone') or '').strip().casefold(),
+        (lot.get('donor') or '').strip().casefold(),
+    )
+
+
+def stock_group_remaining_map(state):
+    lots = state.get('frozen_batches', [])
+    withdrawals = {}
+    for entry in state.get('frozen_withdrawals', []):
+        lid = entry['lot_id']
+        withdrawals[lid] = withdrawals.get(lid, 0) + entry['vials']
+    keys = {lot['id']: _stock_group_key(lot) for lot in lots}
+    totals = {}
+    for lot in lots:
+        key = keys[lot['id']]
+        totals[key] = totals.get(key, 0) + max(0, lot['vials'] - withdrawals.get(lot['id'], 0))
+    return {lid: totals[key] for lid, key in keys.items()}
+
+
+def render_box_print_html(state, box_id):
+    """Render a clean, self-contained A4-landscape printable HTML sheet for a cryo box."""
+    import html as _html
+    storage = ensure_cryo_storage(state)
+    box = _find_box(storage, box_id)
+    if not box:
+        raise ValueError('找不到该冻存盒')
+    loc = box_location_label(storage, box)
+    rows = int(box.get('rows') or 9)
+    cols = int(box.get('cols') or 9)
+    numbering = box.get('numbering') or 'alpha'
+    slots = box.get('slots') or {}
+    batches = {b['id']: b for b in state.get('frozen_batches', [])}
+    risks = contamination_risk_map(state)
+    group_rem = stock_group_remaining_map(state)
+    printed_at = datetime.now(TZ).strftime('%Y-%m-%d %H:%M')
+
+    # Assign subtle sequential print tones by content signature
+    tone_palette = [
+        ('#eef5f0', '#b8d1c2'),
+        ('#eef3f8', '#b8cbe0'),
+        ('#f5f0f9', '#d2bee4'),
+        ('#f9f2e9', '#dfcaa9'),
+        ('#eaf5f5', '#afd3d3'),
+        ('#f8eff2', '#ddb8c4'),
+        ('#f2f5e9', '#c9d4a7'),
+        ('#eff0f9', '#bec2e3'),
+    ]
+    sig_to_tone = {}
+    def _sig(lot):
+        return (*_stock_group_key(lot), (lot.get('passage') or '').strip().casefold(), (lot.get('at') or '')[:10])
+
+    all_keys = box_slot_keys(rows, cols, numbering)
+    for k in all_keys:
+        entry = slots.get(k)
+        lot = batches.get(entry['batch_id']) if entry else None
+        if lot:
+            s = _sig(lot)
+            if s not in sig_to_tone:
+                sig_to_tone[s] = tone_palette[len(sig_to_tone) % len(tone_palette)]
+
+    header_cells = '<th class="axis"></th>' + ''.join(f'<th class="axis">{c + 1}</th>' for c in range(cols))
+    grid_rows = []
+    lot_slots_in_box = {}
+    for r in range(rows):
+        row_label = chr(65 + r) if numbering == 'alpha' else str(r + 1)
+        tds = [f'<th class="axis">{_html.escape(row_label)}</th>']
+        for c in range(cols):
+            key = f'{chr(65 + r)}{c + 1}' if numbering == 'alpha' else str(r * cols + c + 1)
+            entry = slots.get(key)
+            lot = batches.get(entry['batch_id']) if entry else None
+            if not lot:
+                tds.append(f'<td class="cell empty"><div class="coord">{_html.escape(key)}</div><div class="empty-txt">空</div></td>')
+                continue
+            lot_slots_in_box.setdefault(lot['id'], []).append(key)
+            bg, bd = sig_to_tone.get(_sig(lot), ('#eef5f0', '#b8d1c2'))
+            risk = risks.get(lot['id'], {}).get('level', 'none')
+            cls = 'cell occupied'
+            if risk == 'red':
+                cls += ' risk-red'
+            elif risk == 'yellow':
+                cls += ' risk-yellow'
+            clone_html = f'<span class="badge clone">{_html.escape(lot["subclone"])}</span>' if lot.get('subclone') else ''
+            low_n = group_rem.get(lot['id'], 0)
+            low_html = f'<span class="badge low">剩{low_n}</span>' if 0 < low_n <= 2 else ''
+            risk_html = '<span class="badge red">高危</span>' if risk == 'red' else ('<span class="badge yellow">预警</span>' if risk == 'yellow' else '')
+            sub_parts = []
+            if lot.get('resistance_tags'):
+                sub_parts.append(' '.join(lot['resistance_tags']))
+            if lot.get('special_treatments'):
+                sub_parts.append(' / '.join(lot['special_treatments']))
+            if lot.get('passage'):
+                sub_parts.append(lot['passage'])
+            sub_txt = ' · '.join(sub_parts)
+            date_txt = (lot.get('at') or '')[:10]
+            style = f' style="background:{bg};border-color:{bd}"' if risk == 'none' else ''
+            tds.append(
+                f'<td class="{cls}"{style}>'
+                f'<div class="cell-top"><span class="coord">{_html.escape(key)}</span><span class="badges">{clone_html}{low_html}{risk_html}</span></div>'
+                f'<div class="cell-name">{_html.escape(lot["name"])}</div>'
+                + (f'<div class="cell-sub">{_html.escape(sub_txt)}</div>' if sub_txt else '')
+                + (f'<div class="cell-date">{_html.escape(date_txt)}</div>' if date_txt else '')
+                + '</td>'
+            )
+        grid_rows.append('<tr>' + ''.join(tds) + '</tr>')
+
+    summary_rows = []
+    for lid, skeys in lot_slots_in_box.items():
+        lot = batches[lid]
+        tx = ' / '.join(lot.get('special_treatments') or []) or '未记录'
+        res = ' '.join(lot.get('resistance_tags') or []) or '—'
+        risk = risks.get(lid, {}).get('level', 'none')
+        risk_lbl = '红色高危' if risk == 'red' else ('黄色预警' if risk == 'yellow' else '正常')
+        low_n = group_rem.get(lid, 0)
+        rem_lbl = f'{batch_remaining(state, lot)} 管' + (f'（同类总剩 {low_n}）' if 0 < low_n <= 2 else '')
+        summary_rows.append(
+            '<tr>'
+            f'<td><strong>{_html.escape(lot["name"])}</strong></td>'
+            f'<td>{_html.escape(lot.get("subclone") or "—")}</td>'
+            f'<td>{_html.escape(res)}</td>'
+            f'<td>{_html.escape(tx)}</td>'
+            f'<td>{_html.escape(lot.get("passage") or "—")}</td>'
+            f'<td>{_html.escape((lot.get("at") or "")[:10])}</td>'
+            f'<td>{_html.escape("、".join(skeys))}</td>'
+            f'<td>{_html.escape(rem_lbl)}</td>'
+            f'<td>{_html.escape(risk_lbl)}</td>'
+            '</tr>'
+        )
+    summary_html = (
+        '<h2>盒内批次清单</h2>'
+        '<table class="summary"><thead><tr>'
+        '<th>细胞名称</th><th>亚克隆</th><th>抗性</th><th>特殊处理</th><th>代次</th><th>冻存日期</th><th>盒内坐标</th><th>库存</th><th>状态</th>'
+        '</tr></thead><tbody>' + ''.join(summary_rows) + '</tbody></table>'
+    ) if summary_rows else '<p class="muted">此冻存盒当前为空盒。</p>'
+
+    return (
+        '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
+        f'<title>冻存盒分布图 · {_html.escape(loc)}</title>'
+        '<style>'
+        '*{box-sizing:border-box}'
+        'body{font:12px/1.4 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;color:#17322b;margin:0;padding:18px 22px;background:#fff}'
+        '.topbar{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px;border-bottom:2px solid #1e5b4c;padding-bottom:10px}'
+        'h1{margin:0;font-size:19px;color:#14362d}'
+        '.meta{margin-top:4px;color:#556b64;font-size:12px}'
+        '.btn{padding:7px 14px;border:1px solid #1e5b4c;background:#1e5b4c;color:#fff;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer}'
+        'table.grid{width:100%;border-collapse:separate;border-spacing:4px;table-layout:fixed}'
+        'th.axis{font-size:11px;color:#5a7069;font-weight:600;width:24px;text-align:center;padding:2px}'
+        'td.cell{border:1.2px solid #d7dfd9;border-radius:6px;padding:4px 5px;vertical-align:top;height:56px;overflow:hidden}'
+        'td.cell.empty{background:#fbfcfb;color:#aab8b2}'
+        'td.cell.risk-yellow{background:#fef6db !important;border-color:#d4971a !important}'
+        'td.cell.risk-red{background:#fdecea !important;border-color:#c93d35 !important}'
+        '.cell-top{display:flex;justify-content:space-between;align-items:center;gap:2px;margin-bottom:1px}'
+        '.coord{font-size:10px;font-weight:700;color:#526b64}'
+        '.empty-txt{font-size:10px;text-align:center;margin-top:10px}'
+        '.badges{display:flex;gap:2px;flex-wrap:wrap;justify-content:flex-end}'
+        '.badge{font-size:9px;padding:0 4px;border-radius:999px;font-weight:700;line-height:1.4}'
+        '.badge.clone{background:#ece3f8;color:#5b2f91}'
+        '.badge.low{background:#fff0d4;color:#995400}'
+        '.badge.yellow{background:#f7d57e;color:#6f4200}'
+        '.badge.red{background:#e5534b;color:#fff}'
+        '.cell-name{font-weight:700;font-size:11px;line-height:1.2;word-break:break-word}'
+        '.cell-sub{font-size:9.5px;color:#3d574f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}'
+        '.cell-date{font-size:9px;color:#667d75}'
+        'h2{font-size:14px;margin:18px 0 8px;color:#14362d}'
+        'table.summary{width:100%;border-collapse:collapse;font-size:11px}'
+        'table.summary th,table.summary td{border:1px solid #d5ded8;padding:5px 7px;text-align:left}'
+        'table.summary th{background:#eef4f0;color:#1a3d34}'
+        '.muted{color:#667d75}'
+        '@media print{.no-print{display:none !important}body{padding:0}@page{size:A4 landscape;margin:10mm}}'
+        '</style></head><body>'
+        f'<div class="topbar"><div><h1>冻存盒分布图 · {_html.escape(loc)}</h1>'
+        f'<div class="meta">{rows}×{cols}（{"A1 行列坐标" if numbering == "alpha" else "顺序编号"}）· 已占 {len(slots)}/{rows * cols} 格 · 导出时间 {printed_at}</div></div>'
+        '<button id="print-now-btn" class="btn no-print" type="button">打印 / 另存为 PDF</button></div>'
+        f'<table class="grid"><thead><tr>{header_cells}</tr></thead><tbody>{"".join(grid_rows)}</tbody></table>'
+        f'{summary_html}'
+        '<script src="/cryo-print.js"></script>'
+        '</body></html>'
+    )
+
+
 def apply_cryo_command(state, action, payload, now):
     """Dispatch only supported inventory operations within Store.mutate's transaction."""
     handler = INVENTORY_COMMANDS.get(action)
@@ -919,6 +1418,10 @@ def apply_cryo_command(state, action, payload, now):
 
 
 INVENTORY_COMMANDS = {
+    'cryo_delete_slots': apply_cryo_delete_slots,
+    'cryo_clear_yellow_by_thaw': apply_cryo_clear_yellow_by_thaw,
+    'cryo_template_save': apply_cryo_template_save,
+    'cryo_template_delete': apply_cryo_template_delete,
     'cryo_setup_preset': apply_cryo_setup_preset,
     'cryo_device_save': apply_cryo_device_save,
     'cryo_device_delete': apply_cryo_device_delete,

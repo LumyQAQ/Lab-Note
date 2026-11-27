@@ -125,7 +125,7 @@ function bindMediumEditor(wells,defaults=null,root=$('#medium-editor'),namespace
   if(root.dataset.mediumDefaulted==='true')root.querySelectorAll('[data-medium-apply]').forEach(box=>{box.checked=true;box.closest('.medium-field').classList.add('enabled');});
   const reuse=root.querySelector('[data-medium-reuse]');
   if(reuse)reuse.onclick=()=>{const id=root.id;root.outerHTML=mediumEditorMarkup(wells,defaults,true,namespace);bindMediumEditor(wells,defaults,document.getElementById(id),namespace);dirty=true;};
-  const markDirty=()=>{if(namespace!=='create-')dirty=true;};
+  const markDirty=()=>{if(namespace!=='create-'&&namespace!=='thaw-')dirty=true;};
   const apply=key=>root.querySelector(`[data-medium-apply="${key}"]`);
   const enable=key=>{apply(key).checked=true;root.querySelector(`[data-medium-section="${key}"]`).classList.add('enabled');markDirty();};
   const extra=root.querySelector('[data-medium-field="extra"]');

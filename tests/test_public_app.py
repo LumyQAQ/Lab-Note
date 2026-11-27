@@ -35,7 +35,7 @@ class PublicNotebookTests(unittest.TestCase):
         self.assertEqual(self.state['containers'],[])
         self.assertEqual(self.state.get('lab_records',[]),[])
         page=self.get('/').decode()
-        for asset in re.findall(r'(?:src|href)="(/[^"?#]+\.(?:js|css|png|webmanifest))"',page):
+        for asset in re.findall(r'(?:src|href)="(/[^"?#]+\.(?:js|css|png|webmanifest)(?:\?v=[a-f0-9]+)?)"',page):
             with self.subTest(asset=asset):self.assertTrue(self.get(asset))
 
     def test_no_prior_history(self):

@@ -37,7 +37,15 @@ def main():
                 boot=json.load(res)
             assert Path(boot['data_dir'])==data.resolve() and not boot['state']['containers'] and not boot['state'].get('lab_records',[])
             assert not boot['state'].get('frozen_batches') and not boot['state'].get('cryo_storage', {}).get('devices')
-            for route in ('/cryo-storage.js', '/cryo-storage.css'):
+            installed = (ROOT/'VERSION').read_text(encoding='ascii').strip()
+            with http.open(base+'/api/version',timeout=8) as response:
+                assert json.load(response)['version']==installed==boot['app_version']
+            assert installed=='1.5.0-preview.1', installed
+            cli=subprocess.check_output(command+['--version'],cwd=ROOT,encoding='utf-8')
+            assert installed in cli, cli
+            with http.open(base+'/api/storage-stats',timeout=8) as response:
+                assert json.load(response)['total_events']==0
+            for route in ('/cryo-storage.js', '/cryo-storage.css','/theme.js','/theme-dark.css','/cryo-print.js'):
                 with http.open(base+route,timeout=8) as asset:
                     assert asset.status==200 and asset.read(32)
             # Exercise new commands on the isolated database through the embedded Python runtime.

@@ -110,3 +110,8 @@
 .transfer-context-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
 .transfer-context-main strong { color: var(--green); }
 .transfer-context-main span { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.update-banner { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px 14px; padding:11px 16px; margin:-12px 0 22px; border-radius:12px; background:var(--light); border:1px solid var(--line); color:var(--ink); }
+.update-banner[hidden] { display:none; }
+.update-banner-main { min-width:0; flex:1 1 260px; line-height:1.5; overflow-wrap:anywhere; }
+.update-banner-main strong { color:var(--green); }

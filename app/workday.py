@@ -5,6 +5,7 @@ from copy import deepcopy
 from datetime import datetime
 
 from cell_count import normalize_count, count_summary
+from state_codec import loads_state_blob
 from medium import merge_medium, medium_summary, number, text
 from transfer_cultivation import CULTURE_ACTIONS
 from store import TZ, current_time
@@ -103,8 +104,8 @@ def event_entry(conn,row,cache=None):
             snapshots = row if 'before_state' in row else conn.execute(
                 'SELECT before_state,after_state FROM events WHERE id=?', (row['id'],)
             ).fetchone()
-            before = json.loads(snapshots['before_state'])
-            after = json.loads(snapshots['after_state'])
+            before = loads_state_blob(snapshots['before_state'])
+            after = loads_state_blob(snapshots['after_state'])
         return before,after
     def names(ids):
         b,a=states();lookup={c['id']:c['name'] for c in b['containers']+a['containers']}
@@ -166,6 +167,20 @@ def event_entry(conn,row,cache=None):
         if p.get('slots'):
             summary+=' · 格位 '+'、'.join(f"{slot['box_name']}/{slot['slot']}" for slot in p['slots'])
         if p.get('reason'):summary+=' · '+p['reason']
+    elif action=='cryo_delete_slots':
+        title = '删除冻存格位记录'
+        slots = '、'.join(f"{slot['box_name']}/{slot['slot']}" for slot in p['slots'])
+        summary = f"{'、'.join(p['names'])} · 删除 {p['deleted']} 格（{slots}）"
+    elif action=='cryo_template_save':
+        title = '更新常用细胞模板' if p['change']=='update' else '保存常用细胞模板'
+        summary = f"{p['label']}（{p['name']}）"
+    elif action=='cryo_template_delete':
+        title = '删除常用细胞模板'
+        summary = p['label']
+    elif action=='cryo_clear_yellow_by_thaw':
+        title = '同批次复苏无污染 · 解除黄色预警'
+        operation = True
+        summary = p['name'] + (f" · {p['notes']}" if p.get('notes') else '')
     elif action=='finish_sampling':
         occurred=p['at'];operation=True
         containers=names(p['end_sources'])
@@ -267,8 +282,8 @@ def event_entry(conn,row,cache=None):
 
 def event_rows(conn,max_revision=None):
     rows=conn.execute("""SELECT e.id,e.at,e.action,e.payload,
-        json_extract(e.after_state,'$.revision') AS revision,
-        r.at AS undone_at, json_extract(u.after_state,'$.revision') AS undo_revision
+        COALESCE(e.after_rev, json_extract(e.after_state,'$.revision')) AS revision,
+        r.at AS undone_at, COALESCE(u.after_rev, json_extract(u.after_state,'$.revision')) AS undo_revision
         FROM events e LEFT JOIN reversals r ON r.target_event_id=e.id
         LEFT JOIN events u ON u.id=r.undo_event_id ORDER BY e.id DESC""")
     for row in rows:
@@ -299,9 +314,9 @@ def build_workday(conn,state,now,entries=None):
                      'last_activity':related[0]['occurred_at'] if related else None,
                      'active_treatment_count':sum(len(w.get('active_treatments',[])) for w in active_members)})
     active=[c for c in rows if c['status']=='active']
-    snapshot=conn.execute("SELECT id,date,at,verified,json_extract(state,'$.revision') AS revision FROM snapshots WHERE date=? ORDER BY at DESC LIMIT 1",(day,)).fetchone()
+    snapshot=conn.execute("SELECT id,date,at,verified,state FROM snapshots WHERE date=? ORDER BY at DESC LIMIT 1",(day,)).fetchone()
     if snapshot:
-        snapshot=dict(snapshot);snapshot['up_to_date']=snapshot['revision']==state['revision']
+        snapshot=dict(snapshot);snapshot['revision']=loads_state_blob(snapshot.pop('state'))['revision'];snapshot['up_to_date']=snapshot['revision']==state['revision']
     baseline=conn.execute('SELECT id,date,at FROM snapshots WHERE date<? ORDER BY date DESC,at DESC LIMIT 1',(day,)).fetchone()
     return {'date':day,'revision':state['revision'],'counts':{'active':len(active),'pending':sum(not c['checked'] for c in active),
             'checked':sum(c['checked'] for c in active),'operations':sum(e['is_operation'] and not e['undone'] for e in entries),

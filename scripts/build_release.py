@@ -7,6 +7,11 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 FILES = """
 AUTHORS.md
+VERSION
+更新培养工作台.command
+docs/downloads/allowed_signers
+app/update_check.py
+app/mac_update.py
 app/cell_count.py
 app/cryo_storage.py
 app/co_culture.py
@@ -67,6 +72,10 @@ app/static/well-groups.js
 app/static/workday.css
 app/static/workday.js
 app/store.py
+app/state_codec.py
+app/static/theme.js
+app/static/theme-dark.css
+app/static/cryo-print.js
 app/transfer.py
 app/transfer_cultivation.py
 app/well_groups.py
@@ -78,7 +87,7 @@ tests/test_public_app.py
 
 
 def main():
-    target = ROOT / 'docs/downloads/lab-note-v1.4.0.zip'
+    target = ROOT / 'docs/downloads/lab-note-v1.5.0.zip'
     target.parent.mkdir(parents=True, exist_ok=True)
     pending = target.with_suffix('.tmp')
     with zipfile.ZipFile(pending, 'w', compression=zipfile.ZIP_DEFLATED) as archive:

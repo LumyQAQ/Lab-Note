@@ -1,7 +1,9 @@
 Lab Note · 实验笔记
-Windows x64 本地预览版 1.4.0-preview.1
+Windows x64 本地预览版 1.5.0-preview.1
 软件作者：LumyQAQ    https://github.com/LumyQAQ
 本包仅供本地试用。GitHub v1.0.0 为之前发布的版本。
+
+在「数据与备份」可查看安装版本和 Windows x64 新版。升级前请下载完整备份，在旧程序目录双击 Stop-Lab-Note.cmd，随后将新 ZIP 解压到独立目录并启动。
 
 启动
 1. 在 Windows 10/11 的 Intel 或 AMD 64 位电脑上，右键 ZIP 选择“全部解压”。建议放在本地磁盘。

@@ -92,6 +92,9 @@ class CrossPlatformTests(unittest.TestCase):
             self.assertNotEqual(bad.returncode,0)
             self.assertIn(str(port),bad.stderr);self.assertIn('--port auto',bad.stderr)
         with tempfile.TemporaryDirectory() as tmp,socket.socket() as blocker:
+            # Use the same POSIX TIME_WAIT policy as the server after an earlier test exits.
+            if os.name != 'nt':
+                blocker.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 blocker.bind(('127.0.0.1',8875));blocker.listen()
             except OSError:

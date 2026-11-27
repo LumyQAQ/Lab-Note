@@ -17,6 +17,7 @@ ROOT=Path(__file__).resolve().parent
 # The official Windows embeddable distribution intentionally omits the script directory.
 if str(ROOT) not in sys.path:
     sys.path.insert(0,str(ROOT))
+from update_check import read_app_version
 from platform_config import default_data_dir, port_value
 HTTP=build_opener(ProxyHandler({}))
 
@@ -144,7 +145,7 @@ def main():
 
 使用系统 Python 时，也可以运行 python .\app\launch.py --port 8890。
 更改已运行服务的端口：先用同一数据目录执行 --stop，然后用新端口启动。''')
-    parser.add_argument('--version',action='version',version='Lab Note 1.1.0-preview.1 (local)',help='显示本地程序版本')
+    parser.add_argument('--version',action='version',version='Lab Note '+read_app_version()+' (local)',help='显示本地程序版本')
     parser.add_argument('-h','--help',action='help',help='显示本页说明和示例后退出')
     parser.add_argument('--port',type=port_value,default='auto',metavar='auto|PORT',
                         help='默认 auto：优先 8875，冲突时由系统分配空闲端口；指定 1–65535 时严格使用该端口')

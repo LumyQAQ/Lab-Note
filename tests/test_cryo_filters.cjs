@@ -36,3 +36,46 @@ test('linked records use source identities, including grouped wells, instead of 
   const lot = {name:'Sample',sources:[{id:'plate',well:'A1'}],experiment_refs:[{id:'explicit'}]};
   assert.deepEqual(Array.from(ui.cryoLinkedExperiments(lot), item=>item.rec.id), ['explicit','group']);
 });
+
+test('low stock combines matching labels and donors across lots and excludes empty stock', () => {
+  const same = {name: 'Sample', donor: 'Example', subclone: 'A', resistance_tags: ['Tag B', 'Tag A']};
+  const lots = [
+    {...same, id: 'first', vials: 1},
+    {...same, id: 'second', vials: 3, resistance_tags: ['tag a', 'TAG B']},
+    {...same, id: 'other', vials: 1, subclone: 'B'},
+  ];
+  const ui = notebook({frozen_batches: lots, frozen_withdrawals: [{lot_id: 'second', vials: 1}]});
+  const totals = ui.cryoStockGroupRemainingMap();
+  vm.runInContext('cryoUi.lowStockOnly = true', ui);
+  assert.equal(totals.get('first'), 3);
+  assert.equal(ui.cryoMatchesLowStock(lots[0], totals), false);
+  assert.equal(ui.cryoMatchesLowStock(lots[2], totals), true);
+  assert.equal(ui.cryoMatchesResistance(lots[1], 'tag b'), true);
+  assert.equal(ui.cryoMatchesResistance(lots[1], '__none__'), false);
+});
+
+test('thaw defaults use the latest recorded medium and preserve alternatives at the same time', () => {
+  const lot = {id:'sample', name:'Example', sources:[{snapshot:{medium:{base:'Earlier'}}}], at:'2020-01-01'};
+  const records = [
+    {lot_id:'sample', at:'2020-01-02T08:00', mode:'thaw', medium:{base:'Earlier thaw'}},
+    {lot_id:'sample', at:'2020-01-02T08:00', mode:'thaw', medium:{base:'Later entry'}},
+  ];
+  const ui = notebook({frozen_batches:[lot], frozen_withdrawals:records, containers:[]});
+  assert.equal(ui.cryoLastMedium(lot).medium.base, 'Later entry');
+  assert.equal(ui.cryoLastMedium({id:'other', name:'Unrelated'}), null);
+  ui.state.containers.push({created_at:'2020-01-03', name:'Saved unit', wells:{A1:{cell:'Example', medium:{base:'Latest'}}}});
+  assert.equal(ui.cryoLastMedium(lot).medium.base, 'Latest');
+});
+
+test('only an independent thaw entry can verify a single active warning', () => {
+  const lot = {id:'lot',name:'Sample',at:'2020-01-01'};
+  const incident = {id:'incident',lot_id:'lot',mode:'thaw',contamination:{at:'2020-01-02'}};
+  const clean = {id:'verified',lot_id:'lot',mode:'thaw'};
+  const take = {id:'take',lot_id:'lot',mode:'take'};
+  const ui = notebook({frozen_batches:[lot],frozen_withdrawals:[incident,clean,take]});
+  assert.deepEqual(Array.from(ui.cryoCleanThawCandidatesForYellow('lot'), w=>w.id), ['verified']);
+  assert.equal(ui.cryoCanClearYellowWithWithdrawal('take'), false);
+  assert.equal(ui.cryoCanClearYellowWithWithdrawal('verified'), true);
+  ui.state.frozen_withdrawals.push({...incident,id:'another'});
+  assert.equal(ui.cryoCanClearYellowWithWithdrawal('verified'), false);
+});

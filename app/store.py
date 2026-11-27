@@ -10,10 +10,13 @@ from copy import deepcopy
 from datetime import date, datetime
 from pathlib import Path
 from platform_config import TZ
+from state_codec import loads_state_blob, pack_state_blob
 from medium import merge_medium, recipe_catalogue, recipe_key, saved_media
 from cell_count import normalize_count
 from group_units import DISH_TYPES, GROUP_TYPES, group_keys, group_quantity, member_active, normalize_quantity, resize_members
 from manual_groups import apply_merge, apply_unmerge, begin_projection, commit_projection, get_display_group
+
+RECENT_EVENTS = 10
 
 LAYOUTS = {'6孔板': (2, 3), '12孔板': (3, 4), '24孔板': (4, 6),
            '48孔板': (6, 8), '96孔板': (8, 12),
@@ -115,7 +118,7 @@ def _diagnose_scoped_conflict(conn, state, action, payload, revision):
                        (distance - 1,)).fetchone()
     if not row:
         return None
-    baseline = json.loads(row['before_state'])
+    baseline = loads_state_blob(row['before_state'])
     if baseline['revision'] != revision:
         return None
     previous = _scope_snapshot(baseline, container_ids, record_ids)
@@ -155,7 +158,8 @@ class Store:
                     id INTEGER PRIMARY KEY CHECK(id=1), body TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS events (
                     id INTEGER PRIMARY KEY, at TEXT NOT NULL, action TEXT NOT NULL,
-                    payload TEXT NOT NULL, before_state TEXT NOT NULL, after_state TEXT NOT NULL);
+                    payload TEXT NOT NULL, before_state TEXT NOT NULL, after_state TEXT NOT NULL,
+                    after_rev INTEGER);
                 CREATE TABLE IF NOT EXISTS command_requests (
                     request_id TEXT PRIMARY KEY, payload_hash TEXT NOT NULL, event_id INTEGER NOT NULL);
                 CREATE TABLE IF NOT EXISTS snapshots (
@@ -169,6 +173,11 @@ class Store:
                 CREATE TABLE IF NOT EXISTS reversals (
                     target_event_id INTEGER PRIMARY KEY, undo_event_id INTEGER UNIQUE NOT NULL, at TEXT NOT NULL);
             ''')
+            # Serialize concurrent first starts against the same old database.
+            conn.execute('BEGIN IMMEDIATE')
+            columns = {row['name'] for row in conn.execute('PRAGMA table_info(events)')}
+            if 'after_rev' not in columns:
+                conn.execute('ALTER TABLE events ADD COLUMN after_rev INTEGER')
             conn.execute('INSERT OR IGNORE INTO current_state VALUES(1, ?)',
                          (encode({'revision': 0, 'containers': [], 'created_at': current_time().isoformat()}),))
         os.chmod(self.db, 0o600)
@@ -217,7 +226,7 @@ class Store:
             payload=json.loads(row['payload']);cid=payload.get('id')
             if cid not in missing:
                 continue
-            historic=next((c for c in json.loads(row['after_state'])['containers'] if c['id']==cid),None)
+            historic=next((c for c in loads_state_blob(row['after_state'])['containers'] if c['id']==cid),None)
             if historic:
                 candidate=next((metadata_defaults(historic['wells'].get(k)) for k in payload.get('wells',[]) if metadata_defaults(historic['wells'].get(k))),{})
                 if candidate:
@@ -236,7 +245,7 @@ class Store:
         # Recover the first saved recipe for old plates, including recipes first
         # established by an explicit transfer/copy. Do not rewrite actual wells.
         for row in conn.execute("SELECT after_state FROM events WHERE action!='undo' AND id NOT IN (SELECT target_event_id FROM reversals) ORDER BY id"):
-            for historical in json.loads(row['after_state'])['containers']:
+            for historical in loads_state_blob(row['after_state'])['containers']:
                 if historical['id'] not in missing:continue
                 recipe=next((w['medium'] for w in historical['wells'].values() if w.get('medium')),None)
                 if recipe:missing.pop(historical['id'])['medium_defaults']=deepcopy(recipe)
@@ -261,8 +270,8 @@ class Store:
             history = {} if rebuild else self._recipe_cache.copy()
             seen = set() if rebuild else self._recipe_raw_seen.copy()
 
-            def remember(containers):
-                for medium in saved_media(containers):
+            def remember(recipes):
+                for medium in recipes:
                     if medium and medium.get('base'):
                         fingerprint = json.dumps(medium, sort_keys=True, separators=(',', ':'))
                         if fingerprint not in seen:
@@ -272,13 +281,22 @@ class Store:
 
             # Completed observations include the full recipe, even if the submitted
             # patch only changed one component. Rebuild from surviving events on undo.
-            for row in conn.execute("""SELECT json_extract(after_state,'$.containers') FROM events
-                    WHERE id > ? AND action IN ('create','wells','activity','transfer','relocate','lab_record_save')
+            for action, raw in conn.execute("""SELECT action, CASE
+                    WHEN action='cryo_withdraw_vials' THEN json_extract(payload,'$.medium')
+                    WHEN typeof(after_state)='text' THEN json_extract(after_state,'$.containers')
+                    ELSE after_state END FROM events
+                    WHERE id > ? AND action IN ('create','wells','activity','transfer','relocate',
+                        'lab_record_save','cryo_withdraw_vials')
                     AND id NOT IN (SELECT target_event_id FROM reversals) ORDER BY id""", (cursor,)):
-                remember(json.loads(row[0]))
+                if action == 'cryo_withdraw_vials':
+                    if raw:
+                        remember([json.loads(raw)])
+                else:
+                    containers = json.loads(raw) if isinstance(raw, str) else loads_state_blob(raw)['containers']
+                    remember(saved_media(containers))
             if rebuild:
                 current = conn.execute("SELECT json_extract(body,'$.containers') FROM current_state").fetchone()
-                remember(json.loads(current[0]))
+                remember(saved_media(json.loads(current[0])))
             if rebuild or len(history) != len(self._recipe_cache):
                 self._recipe_result = recipe_catalogue(reversed(history.values()))
             self._recipe_cache, self._recipe_raw_seen = history, seen
@@ -307,9 +325,9 @@ class Store:
                             history['additive_entries'].append({'name':name,'concentration':dose,'unit':unit})
         with self.connect() as conn:
             conn.execute('BEGIN')
-            for row in conn.execute("SELECT action,payload FROM events WHERE action IN ('create','wells','transfer','activity') AND id NOT IN (SELECT target_event_id FROM reversals) ORDER BY id DESC"):
+            for row in conn.execute("SELECT action,payload FROM events WHERE action IN ('create','wells','transfer','activity','cryo_withdraw_vials') AND id NOT IN (SELECT target_event_id FROM reversals) ORDER BY id DESC"):
                 payload=json.loads(row['payload'])
-                if row['action']=='create':read(payload.get('medium'))
+                if row['action'] in ('create','cryo_withdraw_vials'):read(payload.get('medium'))
                 elif row['action']=='wells':read(payload.get('patch',{}).get('medium'))
                 elif row['action']=='activity':read(payload.get('medium_patch'))
                 else:
@@ -490,10 +508,10 @@ class Store:
                 candidate=self._undo_candidate(conn)
                 if not candidate or type(payload.get('target_event_id')) is not int or payload['target_event_id']!=candidate['id']:
                     raise ValueError('只能撤销最近一条尚未撤销的变更；请重新打开撤销预览')
-                actual=json.loads(before);expected=json.loads(candidate['after_state'])
+                actual=json.loads(before);expected=loads_state_blob(candidate['after_state'])
                 actual.pop('revision',None);expected.pop('revision',None)
                 if actual!=expected:raise Conflict('当前状态与撤销目标不一致，未执行回退')
-                state=json.loads(candidate['before_state']);state['revision']=revision
+                state=loads_state_blob(candidate['before_state']);state['revision']=revision
                 undo_target=candidate['id'];payload={'target_event_id':undo_target,'original_action':candidate['action']}
             elif action == 'activity':
                 from workday import apply_activity
@@ -506,7 +524,7 @@ class Store:
                 def source_snapshot(snapshot_id):
                     row=conn.execute('SELECT * FROM snapshots WHERE id=?',(snapshot_id,)).fetchone()
                     if not row:raise ValueError('来源快照不存在')
-                    result=dict(row);result['state']=json.loads(result['state']);return result
+                    result=dict(row);result['state']=loads_state_blob(result['state']);return result
                 payload=apply_lab_record(state,payload,source_snapshot)
             elif action == 'check':
                 reason=payload.get('reason')
@@ -663,14 +681,31 @@ class Store:
             state['revision'] += 1
             body = encode(state)
             conn.execute('UPDATE current_state SET body=? WHERE id=1', (body,))
-            inserted=conn.execute('INSERT INTO events(at,action,payload,before_state,after_state) VALUES(?,?,?,?,?)',
-                         (now, action, encode(payload), before, body))
+            inserted=conn.execute('INSERT INTO events(at,action,payload,before_state,after_state,after_rev) VALUES(?,?,?,?,?,?)',
+                         (now, action, encode(payload), before, body, state['revision']))
             if client_request_id:
                 conn.execute('INSERT INTO command_requests VALUES(?,?,?)',
                              (client_request_id, payload_hash, inserted.lastrowid))
             if undo_target is not None:
                 conn.execute('INSERT INTO reversals VALUES(?,?,?)',(undo_target,inserted.lastrowid,now))
+            aging = conn.execute('SELECT id FROM events ORDER BY id DESC LIMIT 1 OFFSET ?',
+                                 (RECENT_EVENTS,)).fetchone()
+            if aging:
+                self._compress_event(conn, aging['id'])
         return state
+
+    @staticmethod
+    def _compress_event(conn, event_id):
+        row = conn.execute("""SELECT before_state, after_state, after_rev FROM events WHERE id=?
+                           AND (typeof(before_state)='text' OR typeof(after_state)='text')""", (event_id,)).fetchone()
+        if row is None:
+            return
+        revision = row['after_rev']
+        if revision is None:
+            revision = loads_state_blob(row['after_state'])['revision']
+        conn.execute('UPDATE events SET before_state=?, after_state=?, after_rev=? WHERE id=?',
+                     (pack_state_blob(row['before_state']), pack_state_blob(row['after_state']),
+                      revision, event_id))
 
     def snapshot(self, now=None, source='manual', expected_revision=None):
         now = (now or current_time()).astimezone(TZ)
@@ -728,7 +763,7 @@ class Store:
             if row is None:
                 raise ValueError('快照不存在')
             result = dict(row)
-            result['state'] = json.loads(result['state'])
+            result['state'] = loads_state_blob(result['state'])
             result['verified'] = bool(result['verified'])
             return result
 
@@ -803,7 +838,7 @@ class Store:
         if newest > cursor:
             additions = {}
             for row in conn.execute("""SELECT id, at, action, payload,
-                       json_extract(after_state, '$.revision') AS revision
+                       COALESCE(after_rev, json_extract(after_state, '$.revision')) AS revision
                        FROM events WHERE id > ? ORDER BY id""", (cursor,)):
                 additions[row['id']] = (row['revision'], event_entry(conn, row))
             self._event_cache.update(additions)
@@ -834,7 +869,7 @@ class Store:
             conn.execute('BEGIN')
             entries = self._event_entries(conn, max_revision)
             if max_revision is not None and entries:
-                state = json.loads(conn.execute('SELECT after_state FROM events WHERE id=?',
+                state = loads_state_blob(conn.execute('SELECT after_state FROM events WHERE id=?',
                                                 (entries[0]['event_id'],)).fetchone()[0])
             else:
                 state = json.loads(conn.execute('SELECT body FROM current_state').fetchone()[0])
@@ -856,6 +891,71 @@ class Store:
                 raise RuntimeError('备份完整性校验失败')
         os.chmod(temporary, 0o600)
         temporary.replace(target)
-        digest = hashlib.sha256(target.read_bytes()).hexdigest()
+        checksum = hashlib.sha256()
+        with target.open('rb') as saved:
+            for block in iter(lambda: saved.read(1024 * 1024), b''):
+                checksum.update(block)
+        digest = checksum.hexdigest()
         target.with_suffix('.sha256').write_text(f'{digest}  {target.name}\n')
         return target
+
+    def storage_stats(self):
+        """Inspect the database on request, without loading historical states."""
+        with self.lock, self.connect() as conn:
+            conn.execute('BEGIN')
+            total_events, compressed_events = conn.execute("""
+                SELECT COUNT(*), COUNT(CASE WHEN typeof(before_state)='blob'
+                    AND typeof(after_state)='blob' THEN 1 END) FROM events
+            """).fetchone()
+            total_snapshots, compressed_snapshots = conn.execute("""
+                SELECT COUNT(*), COUNT(CASE WHEN typeof(state)='blob' THEN 1 END) FROM snapshots
+            """).fetchone()
+            free_pages = conn.execute('PRAGMA freelist_count').fetchone()[0]
+            page_size = conn.execute('PRAGMA page_size').fetchone()[0]
+            return {
+                'db_bytes': self.db.stat().st_size,
+                'total_events': total_events,
+                'compressed_events': compressed_events,
+                'total_snapshots': total_snapshots,
+                'compressed_snapshots': compressed_snapshots,
+                'reclaimable_bytes': free_pages * page_size,
+                'keep_recent_window': RECENT_EVENTS,
+            }
+
+    def compact_storage(self, keep_recent=RECENT_EVENTS, vacuum=True):
+        """Compress cold events and snapshots atomically, preserving their JSON."""
+        if type(keep_recent) is not int or not 0 <= keep_recent <= 2**63 - 1:
+            raise ValueError('保留的近期事件数须为非负整数')
+        if type(vacuum) is not bool:
+            raise ValueError('回收空间选项须为布尔值')
+        with self.lock:
+            with self.connect() as conn:
+                conn.execute('BEGIN IMMEDIATE')
+                before_bytes = self.db.stat().st_size
+                # Materialize only identifiers, then load and pack one state pair at a time.
+                events = conn.execute("""
+                    SELECT id FROM events WHERE id <= (
+                        SELECT id FROM events ORDER BY id DESC LIMIT 1 OFFSET ?)
+                    AND (typeof(before_state)='text' OR typeof(after_state)='text')
+                """, (keep_recent,)).fetchall()
+                for event in events:
+                    self._compress_event(conn, event['id'])
+                snapshots = conn.execute("SELECT id FROM snapshots WHERE typeof(state)='text'").fetchall()
+                for snapshot in snapshots:
+                    sid = snapshot['id']
+                    raw = conn.execute('SELECT state FROM snapshots WHERE id=?', (sid,)).fetchone()[0]
+                    conn.execute('UPDATE snapshots SET state=? WHERE id=?', (pack_state_blob(raw), sid))
+            if vacuum:
+                with self.connect() as conn:
+                    conn.execute('VACUUM')
+                    if conn.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+                        raise RuntimeError('数据库整理后完整性校验失败')
+            stats = self.storage_stats()
+            return {
+                'before_bytes': before_bytes,
+                'after_bytes': stats['db_bytes'],
+                'saved_bytes': max(0, before_bytes - stats['db_bytes']),
+                'compressed_events': len(events),
+                'compressed_snapshots': len(snapshots),
+                'stats': stats,
+            }

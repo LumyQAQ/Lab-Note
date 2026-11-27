@@ -8,16 +8,107 @@ const cryoUi = {
   kindFilter: '',
   cellFilter: '',
   treatmentFilter: '',
+  resistanceFilter: '',
+  lowStockOnly: false,
   batchStageFilter: 'all',
-  mode: null, // null | {type:'place', lotId, picks:[{box_id,slot}]} | {type:'move', from:[{box_id,slot,batch_id}], picks:[{box_id,slot}]}
+  inlineDraft: null,
+  mode: null, // null | {type:'place', lotId, picks:[{box_id,slot}]} | {type:'move', from:[{box_id,slot,batch_id}], picks:[{box_id,slot}]} | {type:'copy', ...}
 };
+
+function cryoReadTreatmentRowValues(root) {
+  return [...root.querySelectorAll('input[name="special_treatment_item"]')].map(i => i.value);
+}
+
+function cryoSyncInlineDraft(root = document) {
+  const form = root.querySelector('#cryo-inline-stock-form');
+  if (!form) return;
+  const v = n => (form.elements.namedItem(n)?.value || '').trim();
+  const resCustom = form.querySelector('[data-res-input]')?.value || '';
+  const seqOn = !!form.elements.namedItem('subclone_seq_on')?.checked;
+  const seqPrefix = form.elements.namedItem('subclone_seq_prefix')?.value ?? '#';
+  const seqStart = form.elements.namedItem('subclone_seq_start')?.value ?? '1';
+  cryoUi.inlineDraft = {
+    name: v('name'),
+    cell_kind: v('cell_kind'),
+    special_treatments: cryoReadTreatmentRowValues(form),
+    resistance_tags: cryoReadResistance(form, false),
+    resistance_custom: resCustom,
+    cryo_source: v('cryo_source'),
+    subclone: v('subclone'),
+    subclone_seq_on: seqOn,
+    subclone_seq_prefix: seqPrefix,
+    subclone_seq_start: seqStart,
+    at: v('at'),
+    passage: v('passage'),
+    donor: v('donor'),
+    suggested_vessel: cryoReadSuggestedVessel(form),
+    per_vial_count: cryoReadSciCount(form),
+    labels: v('labels'),
+    day0: v('day0'),
+    notes: v('notes')
+  };
+}
+
+function cryoHasInlineDraft() {
+  const form = document.querySelector('#cryo-inline-stock-form');
+  if (form) cryoSyncInlineDraft(document);
+  const d = cryoUi.inlineDraft;
+  if (!d) return false;
+  const todayStr = boot?.today || localMinute().slice(0, 10);
+  return !!(
+    d.name || d.cell_kind || (d.special_treatments && d.special_treatments.some(x => String(x || '').trim()))
+    || (d.resistance_tags && d.resistance_tags.length) || d.resistance_custom || d.cryo_source || d.subclone_seq_on || d.subclone
+    || (d.at && d.at !== todayStr) || d.passage || d.donor || d.suggested_vessel
+    || d.per_vial_count || d.labels || d.day0 || d.notes
+  );
+}
+
+function cryoFormEditing() {
+  if (typeof view !== 'undefined' && view !== 'cryo') return false;
+  if (cryoUi.mode) return true;
+  if (document.querySelector('#cryo-inline-stock-form, #cryo-copy-form')) return true;
+  return cryoHasInlineDraft();
+}
+
+function cryoGuardFormEnter(form) {
+  form.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    const t = e.target;
+    if (!t || t.tagName !== 'INPUT' || t.hasAttribute('data-res-input')) return;
+    if (t.type === 'submit' || t.type === 'button' || t.type === 'checkbox' || t.type === 'radio') return;
+    e.preventDefault();
+  });
+}
 
 const CRYO_DEVICE_LABELS = {ln2: '液氮罐', minus80: '-80°C 冰箱', custom: '自定义设备'};
 const CRYO_SUPERSCRIPTS = {'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','-':'⁻','+':'⁺'};
 
 function cryoStorage() {
   const s = state?.cryo_storage;
-  return {devices: s?.devices || [], racks: s?.racks || [], boxes: s?.boxes || []};
+  return {devices: s?.devices || [], racks: s?.racks || [], boxes: s?.boxes || [], templates: s?.templates || []};
+}
+function cryoStockGroupKey(lot) {
+  const res = [...new Set((lot?.resistance_tags || []).map(t => String(t || '').trim().toLowerCase()).filter(Boolean))].sort().join('\x1f');
+  return [
+    cryoNormCell(lot),
+    cryoNormTreatments(lot).join('\x1f'),
+    res,
+    String(lot?.subclone || '').trim().toLowerCase(),
+    String(lot?.donor || '').trim().toLowerCase()
+  ].join('|');
+}
+function cryoStockGroupRemainingMap() {
+  const lots = state?.frozen_batches || [];
+  const totals = new Map();
+  for (const lot of lots) {
+    const rem = cryoBatchRemaining(lot);
+    if (rem <= 0) continue;
+    const k = cryoStockGroupKey(lot);
+    totals.set(k, (totals.get(k) || 0) + rem);
+  }
+  const byLot = new Map();
+  for (const lot of lots) byLot.set(lot.id, totals.get(cryoStockGroupKey(lot)) || 0);
+  return byLot;
 }
 function cryoSlotKeys(box) {
   if (!box) return [];
@@ -70,8 +161,11 @@ function cryoRelationTier(anchor, other) {
   if (!cryoNormCell(anchor) || cryoNormCell(anchor) !== cryoNormCell(other)) return null;
   if (!cryoDonorCompatible(anchor, other)) return null;
   const txA = cryoNormTreatments(anchor).join('\x00'), txB = cryoNormTreatments(other).join('\x00');
-  if (txA === txB && String(anchor.at || '').slice(0, 10) === String(other.at || '').slice(0, 10)) return 'strong';
-  if (txA === txB) return 'weak';
+  const cloneA = String(anchor?.subclone || '').trim().toLowerCase();
+  const cloneB = String(other?.subclone || '').trim().toLowerCase();
+  const sameClone = cloneA === cloneB;
+  if (txA === txB && sameClone && String(anchor.at || '').slice(0, 10) === String(other.at || '').slice(0, 10)) return 'strong';
+  if (txA === txB && sameClone) return 'weak';
   return 'weaker';
 }
 function cryoRelatedGroups(lotId) {
@@ -89,24 +183,49 @@ function cryoRelatedGroups(lotId) {
   }
   return groups;
 }
+const CRYO_CONTAM_PROPAGATION_DAYS = 30;
+function cryoParsePassageNum(lot) {
+  const m = String(lot?.passage || '').trim().match(/^[Pp]?\s*(\d+)$/);
+  return m ? Number(m[1]) : null;
+}
+function cryoResistanceCompatible(src, other) {
+  const ra = new Set((src?.resistance_tags || []).map(t => String(t || '').trim().toLowerCase()).filter(Boolean));
+  const rb = new Set((other?.resistance_tags || []).map(t => String(t || '').trim().toLowerCase()).filter(Boolean));
+  if (!ra.size || !rb.size) return true;
+  for (const x of ra) if (rb.has(x)) return true;
+  return false;
+}
+function cryoWithinContamWindow(srcAt, otherAt) {
+  if (!srcAt || !otherAt || otherAt <= srcAt) return false;
+  const t1 = Date.parse(srcAt.slice(0, 10) + 'T00:00:00Z');
+  const t2 = Date.parse(otherAt.slice(0, 10) + 'T00:00:00Z');
+  if (!Number.isFinite(t1) || !Number.isFinite(t2)) return false;
+  const days = Math.round((t2 - t1) / 86400000);
+  return days >= 0 && days <= CRYO_CONTAM_PROPAGATION_DAYS;
+}
 function cryoContaminationMap() {
   const lots = state?.frozen_batches || [];
   const byId = new Map(lots.map(b => [b.id, b]));
-  const events = (state?.frozen_withdrawals || []).filter(w => w.contamination && typeof w.contamination === 'object');
+  const events = (state?.frozen_withdrawals || []).filter(
+    w => w.contamination && typeof w.contamination === 'object' && !w.contamination.cleared_by_clean_thaw
+  );
   const map = new Map(lots.map(b => [b.id, {level: 'none', hits: 0, events: []}]));
   for (const w of events) {
     const src = byId.get(w.lot_id);
     if (!src) continue;
-    const srcCell = cryoNormCell(src), srcAt = src.at || '';
+    const srcCell = cryoNormCell(src), srcAt = src.at || '', srcP = cryoParsePassageNum(src);
     for (const b of lots) {
       const isStrong = b.id === src.id || cryoRelationTier(src, b) === 'strong';
-      const isLaterSame = !!srcCell && cryoNormCell(b) === srcCell && cryoDonorCompatible(src, b) && (b.at || '') > srcAt;
+      const bP = cryoParsePassageNum(b);
+      const passageOk = srcP === null || bP === null || bP >= srcP;
+      const isLaterSame = !!srcCell && cryoNormCell(b) === srcCell && cryoDonorCompatible(src, b)
+        && cryoResistanceCompatible(src, b) && passageOk && cryoWithinContamWindow(srcAt, b.at || '');
       if (!isStrong && !isLaterSame) continue;
       const info = map.get(b.id);
       info.hits += 1;
       info.events.push({
         withdrawalId: w.id, sourceLotId: src.id, sourceName: src.name, sourceAt: srcAt,
-        contamination: w.contamination, reason: isStrong ? '同批次 / 强相关复苏污染' : '冻存时间靠后的同类型细胞风险'
+        contamination: w.contamination, reason: isStrong ? '同批次 / 强相关复苏污染' : `冻存后 ${CRYO_CONTAM_PROPAGATION_DAYS} 天内同类型细胞风险`
       });
     }
   }
@@ -115,6 +234,34 @@ function cryoContaminationMap() {
     else if (info.hits === 1) info.level = 'yellow';
   }
   return map;
+}
+function cryoCleanThawCandidatesForYellow(lotId) {
+  const lots = state?.frozen_batches || [];
+  const byId = new Map(lots.map(b => [b.id, b]));
+  const risks = cryoContaminationMap();
+  const risk = risks.get(lotId);
+  if (!risk || risk.level !== 'yellow' || !risk.events.length) return [];
+  const srcLotIds = new Set(risk.events.map(e => e.sourceLotId));
+  return (state?.frozen_withdrawals || []).filter(w => {
+    if (w.discarded || (w.mode !== 'thaw' && !w.destination)) return false;
+    if (w.contamination || w.clean_verification || risks.get(w.lot_id)?.level !== 'yellow') return false;
+    const wLot = byId.get(w.lot_id);
+    if (!wLot) return false;
+    for (const sid of srcLotIds) {
+      const sLot = byId.get(sid);
+      if (sLot && (wLot.id === sLot.id || cryoRelationTier(sLot, wLot) === 'strong')) return true;
+    }
+    return false;
+  });
+}
+function cryoCanClearYellowWithWithdrawal(withdrawalId, risks = cryoContaminationMap(), byId = new Map((state.frozen_batches || []).map(l => [l.id, l]))) {
+  const w = (state.frozen_withdrawals || []).find(x => x.id === withdrawalId);
+  if (!w || w.discarded || w.contamination || w.clean_verification || (w.mode !== 'thaw' && !w.destination)) return false;
+  const lot = byId.get(w.lot_id), risk = risks.get(w.lot_id);
+  return Boolean(lot && risk?.level === 'yellow' && risk.events.some(ev => {
+    const source = byId.get(ev.sourceLotId);
+    return source && (source.id === lot.id || cryoRelationTier(source, lot) === 'strong');
+  }));
 }
 function cryoGradientSummary() {
   const todayMs = Date.parse((boot?.today || localMinute().slice(0, 10)) + 'T00:00:00Z');
@@ -143,6 +290,7 @@ function cryoLotToneKey(lot) {
     cryoBatchKind(lot).toLowerCase(),
     tx,
     res,
+    String(lot.subclone || '').trim().toLowerCase(),
     String(lot.at || '').slice(0, 10),
     String(lot.passage || '').trim().toLowerCase(),
     String(lot.donor || '').trim().toLowerCase(),
@@ -205,7 +353,7 @@ function cryoTreatmentRowsMarkup(values = [], listId = 'cryo-tx-list') {
     <datalist id="${esc(listId)}">${history.map(tx => `<option value="${esc(tx)}">`).join('')}</datalist>
   </div>`;
 }
-function cryoBindTreatmentRows(root) {
+function cryoBindTreatmentRows(root, onChange = null) {
   root.querySelectorAll('[data-tx-group]').forEach(group => {
     const list = group.querySelector('[data-tx-list]');
     const listId = group.dataset.txListId || 'cryo-tx-list';
@@ -219,6 +367,7 @@ function cryoBindTreatmentRows(root) {
     const addBtn = group.querySelector('[data-tx-add]');
     if (addBtn) addBtn.onclick = () => {
       list.insertAdjacentHTML('beforeend', cryoTreatmentRowHtml('', listId));
+      onChange?.();
       [...list.querySelectorAll('input[name="special_treatment_item"]')].at(-1)?.focus?.();
     };
   });
@@ -249,7 +398,7 @@ function cryoHistoryResistance() {
   for (const b of state?.frozen_batches || []) (b.resistance_tags || []).forEach(add);
   return out;
 }
-function cryoResistanceMarkup(selected = []) {
+function cryoResistanceMarkup(selected = [], custom = '') {
   const selNorm = new Set((selected || []).map(x => String(x || '').trim().toLowerCase()).filter(Boolean));
   const options = cryoHistoryResistance();
   for (const raw of selected || []) {
@@ -262,7 +411,7 @@ function cryoResistanceMarkup(selected = []) {
       ${options.map(tag => `<button type="button" class="cryo-res-pill" data-res-pill="${esc(tag)}" aria-pressed="${selNorm.has(tag.toLowerCase())}">${esc(tag)}</button>`).join('')}
     </div>
     <div class="cryo-res-custom">
-      <input type="text" data-res-input aria-label="抗性标签" maxlength="60" placeholder="填写已记录的抗性标签">
+      <input type="text" data-res-input aria-label="抗性标签" value="${esc(custom)}" maxlength="60" placeholder="填写已记录的抗性标签">
       <button type="button" class="button secondary" data-res-add>＋ 添加</button>
     </div>
   </div>`;
@@ -305,7 +454,7 @@ function cryoBindResistance(root, onChange = null) {
     if (input) input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); addCustom(); } };
   });
 }
-function cryoReadResistance(root) {
+function cryoReadResistance(root, includeCustom = true) {
   const out = [], seen = new Set();
   const push = raw => {
     const t = String(raw || '').trim();
@@ -314,7 +463,7 @@ function cryoReadResistance(root) {
     if (!seen.has(k)) { seen.add(k); out.push(t); }
   };
   root.querySelectorAll('[data-res-pill][aria-pressed="true"]').forEach(b => push(b.dataset.resPill));
-  root.querySelectorAll('[data-res-input]').forEach(inp => cryoParseTreatmentsInput(inp.value).forEach(push));
+  if (includeCustom) root.querySelectorAll('[data-res-input]').forEach(inp => cryoParseTreatmentsInput(inp.value).forEach(push));
   return out;
 }
 function cryoLinkedExperiments(lot) {
@@ -366,10 +515,10 @@ function cryoSciCountMarkup(countObj, legacyText = '') {
     <label>单位${unitChoice(`<input name="count_unit" maxlength="100" value="${esc(countObj?.unit || 'cells')}" placeholder="cells">`, ['cells', 'cells/vial', '个/管'], '每管计数单位')}</label>
   </div>${!countObj?.coefficient && legacyText ? `<p class="muted">原纯文本记录：${esc(legacyText)}</p>` : ''}`;
 }
-function cryoSourceMarkup() {
+function cryoSourceMarkup(selected = '') {
   const options = (state.containers || []).flatMap(c => Object.entries(c.wells || {})
     .filter(([, well]) => well.cell)
-    .map(([key, well]) => `<option value="${esc(JSON.stringify({id: c.id, well: key}))}">${esc([c.name, key, well.cell].join(' / '))}</option>`));
+    .map(([key, well]) => `<option value="${esc(JSON.stringify({id: c.id, well: key}))}" ${selected === JSON.stringify({id: c.id, well: key}) ? 'selected' : ''}>${esc([c.name, key, well.cell].join(' / '))}</option>`));
   return options.length ? `<label>关联培养来源（可选）<select name="cryo_source">
     <option value="">未关联</option>${options.join('')}</select></label>` : '';
 }
@@ -405,6 +554,180 @@ function cryoParseTreatmentsInput(str) {
   return String(str || '').split(/[,，、;；\n]/).map(s => s.trim()).filter(Boolean);
 }
 
+// --- Batch Subclone Sequence & Reusable Cell Templates ---
+
+function cryoSubcloneSeqMarkup(slotLabels, draft = {}) {
+  if (!Array.isArray(slotLabels) || slotLabels.length < 2) return '';
+  const on = !!draft.subclone_seq_on;
+  const prefix = draft.subclone_seq_prefix !== undefined ? String(draft.subclone_seq_prefix) : '#';
+  const start = draft.subclone_seq_start !== undefined && String(draft.subclone_seq_start).trim() !== ''
+    ? Number(draft.subclone_seq_start) : 1;
+  const startSafe = Number.isInteger(start) && start >= 0 ? start : 1;
+  const preview = slotLabels.map((s, i) => `${s} → ${prefix}${startSafe + i}`).join(' · ');
+  return `<div class="cryo-subclone-seq" data-subclone-seq>
+    <label class="inline-check"><input type="checkbox" name="subclone_seq_on" ${on ? 'checked' : ''}><strong>按选中格位顺序分别生成独立亚克隆</strong>（共 ${slotLabels.length} 个独立 1 管亚克隆，各用不同颜色显示）</label>
+    <div class="cryo-subclone-seq-fields" data-seq-fields ${on ? '' : 'hidden'}>
+      <div class="two">
+        <label>亚克隆前缀<input name="subclone_seq_prefix" maxlength="40" value="${esc(prefix)}" placeholder="# 或 Clone "></label>
+        <label>起始序号<input name="subclone_seq_start" type="number" min="0" max="99999" step="1" value="${startSafe}"></label>
+      </div>
+      <div class="cryo-subclone-seq-preview" data-seq-preview>预览：${esc(preview)}</div>
+    </div>
+  </div>`;
+}
+function cryoBindSubcloneSeq(form, slotLabels, onChange = null) {
+  const wrap = form.querySelector('[data-subclone-seq]');
+  if (!wrap) return;
+  const chk = form.elements.namedItem('subclone_seq_on');
+  const fields = wrap.querySelector('[data-seq-fields]');
+  const preview = wrap.querySelector('[data-seq-preview]');
+  const singleSub = form.elements.namedItem('subclone');
+  const sync = () => {
+    const on = !!chk?.checked;
+    if (fields) fields.hidden = !on;
+    if (singleSub) singleSub.disabled = on;
+    const prefix = form.elements.namedItem('subclone_seq_prefix')?.value ?? '#';
+    const rawStart = Number(form.elements.namedItem('subclone_seq_start')?.value);
+    const startSafe = Number.isInteger(rawStart) && rawStart >= 0 ? rawStart : 1;
+    if (preview) preview.textContent = '预览：' + slotLabels.map((s, i) => `${s} → ${prefix}${startSafe + i}`).join(' · ');
+    onChange?.();
+  };
+  chk?.addEventListener('change', sync);
+  form.elements.namedItem('subclone_seq_prefix')?.addEventListener('input', sync);
+  form.elements.namedItem('subclone_seq_start')?.addEventListener('input', sync);
+  sync();
+}
+function cryoReadSubcloneSeq(form, slotCount) {
+  if (slotCount < 2 || !form.elements.namedItem('subclone_seq_on')?.checked) return null;
+  const prefix = (form.elements.namedItem('subclone_seq_prefix')?.value ?? '#').trim();
+  const start = Number(form.elements.namedItem('subclone_seq_start')?.value);
+  return {prefix: prefix || '#', start: Number.isInteger(start) && start >= 0 ? start : 1};
+}
+
+function cryoTemplateBarMarkup() {
+  const tpls = cryoStorage().templates;
+  return `<div class="cryo-tpl-bar" data-cryo-tpl-bar>
+    <span class="cryo-tpl-title">常用模板</span>
+    <div class="cryo-tpl-chips">
+      ${tpls.map(t => `<span class="cryo-tpl-chip-wrap"><button type="button" class="cryo-tpl-chip" data-apply-tpl="${esc(t.id)}" title="${esc([t.name, ...(t.resistance_tags || []), ...(t.special_treatments || [])].join(' · '))}">${esc(t.label || t.name)}</button><button type="button" class="cryo-tpl-del" data-del-tpl="${esc(t.id)}" aria-label="删除模板 ${esc(t.label || t.name)}">×</button></span>`).join('')}
+      <button type="button" class="text-button cryo-tpl-save" data-save-tpl>＋ 存当前表单为模板</button>
+    </div>
+  </div>`;
+}
+function cryoApplyTemplateToForm(form, tpl, onChange = null) {
+  if (!form || !tpl) return;
+  const setVal = (n, val) => { const el = form.elements.namedItem(n); if (el) el.value = val ?? ''; };
+  setVal('name', tpl.name || '');
+  setVal('cell_kind', tpl.cell_kind || '');
+  setVal('donor', tpl.donor || '');
+  setVal('subclone', tpl.subclone);
+  setVal('passage', tpl.passage);
+  setVal('notes', tpl.notes);
+  // Treatments
+  const txGroup = form.querySelector('[data-tx-group]');
+  if (txGroup) {
+    const list = txGroup.querySelector('[data-tx-list]');
+    const listId = txGroup.dataset.txListId || 'cryo-tx-list';
+    const items = (tpl.special_treatments || []).length ? tpl.special_treatments : [''];
+    list.innerHTML = items.map(v => cryoTreatmentRowHtml(v, listId)).join('');
+    cryoBindTreatmentRows(form, onChange);
+  }
+  // Resistance pills
+  const resGroup = form.querySelector('[data-res-group]');
+  if (resGroup) {
+    const custom = resGroup.querySelector('[data-res-input]');
+    if (custom) custom.value = '';
+    const wanted = new Set((tpl.resistance_tags || []).map(x => String(x || '').trim().toLowerCase()).filter(Boolean));
+    const pillsWrap = resGroup.querySelector('[data-res-pills]');
+    pillsWrap.querySelectorAll('[data-res-pill]').forEach(btn => {
+      btn.setAttribute('aria-pressed', wanted.has(btn.dataset.resPill.toLowerCase()) ? 'true' : 'false');
+    });
+    for (const tag of tpl.resistance_tags || []) {
+      if (![...pillsWrap.querySelectorAll('[data-res-pill]')].some(b => b.dataset.resPill.toLowerCase() === tag.toLowerCase())) {
+        const btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'cryo-res-pill'; btn.dataset.resPill = tag;
+        btn.setAttribute('aria-pressed', 'true'); btn.textContent = tag;
+        pillsWrap.appendChild(btn);
+      }
+    }
+    cryoBindResistance(form, onChange);
+  }
+  // Suggested vessel
+  const vSel = form.elements.namedItem('suggested_vessel_select');
+  const vWrap = form.querySelector('[data-custom-vessel]');
+  const vCustom = form.elements.namedItem('suggested_vessel_custom');
+  if (vSel) {
+    const types = boot?.types || ['T25', 'T75', 'T175', '培养皿', '6孔板', '12孔板', '24孔板', '48孔板', '96孔板'];
+    const sv = tpl.suggested_vessel || '';
+    if (!sv || types.includes(sv)) {
+      vSel.value = sv;
+      if (vWrap) vWrap.hidden = true;
+      if (vCustom) vCustom.value = '';
+    } else {
+      vSel.value = '__custom__';
+      if (vWrap) vWrap.hidden = false;
+      if (vCustom) vCustom.value = sv;
+    }
+  }
+  // Scientific count
+  setVal('count_coeff', tpl.per_vial_count?.coefficient || '');
+  setVal('count_exp', tpl.per_vial_count?.exponent ?? (tpl.per_vial_count?.coefficient ? '6' : ''));
+  setVal('count_unit', tpl.per_vial_count?.unit || 'cells');
+  onChange?.();
+}
+function cryoBindTemplateBar(root, form, onChange = null, onStateUpdated = null) {
+  const bar = root.querySelector('[data-cryo-tpl-bar]');
+  if (!bar || !form) return;
+  bar.querySelectorAll('[data-apply-tpl]').forEach(btn => btn.onclick = () => {
+    const tpl = cryoStorage().templates.find(t => t.id === btn.dataset.applyTpl);
+    if (!tpl) return;
+    cryoApplyTemplateToForm(form, tpl, onChange);
+    toast(`已套用模板「${tpl.label || tpl.name}」`);
+  });
+  bar.querySelectorAll('[data-del-tpl]').forEach(btn => btn.onclick = async () => {
+    if (busy) return;
+    const tpl = cryoStorage().templates.find(t => t.id === btn.dataset.delTpl);
+    if (!tpl || !confirm(`删除常用模板「${tpl.label || tpl.name}」？（可撤销）`)) return;
+    busy = true;
+    try {
+      const res = await api('/api/command', {action: 'cryo_template_delete', revision: state.revision, payload: {id: tpl.id}});
+      state = res.state;
+      onStateUpdated ? onStateUpdated() : renderCryoBody();
+      toast('模板已删除。');
+    } catch (err) { toast(err.message, true); }
+    finally { busy = false; if (typeof renderUndoControl === 'function') renderUndoControl(); }
+  });
+  const saveBtn = bar.querySelector('[data-save-tpl]');
+  if (saveBtn) saveBtn.onclick = async () => {
+    if (busy) return;
+    const v = n => (form.elements.namedItem(n)?.value || '').trim();
+    const name = v('name');
+    if (!name) return toast('请先填写细胞名称再存为模板。', true);
+    const resTags = cryoReadResistance(form);
+    const txs = cryoReadTreatmentRows(form);
+    const defaultLabel = [name, resTags.slice(0, 2).join('/'), !resTags.length ? txs[0] : ''].filter(Boolean).join(' ');
+    const label = prompt('模板显示名称（便于一键识别）：', defaultLabel);
+    if (label === null) return;
+    const payload = {
+      label: label.trim() || defaultLabel, subclone: v('subclone'),
+      name, cell_kind: v('cell_kind'),
+      special_treatments: txs, resistance_tags: resTags,
+      donor: v('donor'), passage: v('passage'),
+      suggested_vessel: cryoReadSuggestedVessel(form),
+      per_vial_count: cryoReadSciCount(form),
+      notes: v('notes')
+    };
+    busy = true;
+    try {
+      const res = await api('/api/command', {action: 'cryo_template_save', revision: state.revision, payload});
+      state = res.state;
+      onStateUpdated ? onStateUpdated() : renderCryoBody();
+      toast(`已保存常用模板「${payload.label}」`);
+    } catch (err) { toast(err.message, true); }
+    finally { busy = false; if (typeof renderUndoControl === 'function') renderUndoControl(); }
+  };
+}
+
 // --- Filtering & Bidirectional Facets ---
 
 function cryoBatchKind(lot) {
@@ -426,7 +749,7 @@ function cryoBatchSearchHaystack(lot) {
   const placed = cryoBatchPlacedSlots(lot.id).map(p => `${cryoBoxLabel(p.box)} ${p.slot} ${p.entry.vial_label || ''}`).join(' ');
   const txText = [...(lot.special_treatments || []), ...cryoTreatmentFacets(lot).keys()].join(' ');
   return [
-    lot.name, cryoBatchKind(lot), txText, (lot.resistance_tags || []).join(' '),
+    lot.name, cryoBatchKind(lot), txText, (lot.resistance_tags || []).join(' '), lot.subclone,
     lot.passage, lot.donor, lot.suggested_vessel, lot.labels, lot.location, lot.notes, lot.id, placed,
     (lot.sources || []).map(src => [src.name, src.well].join(' ')).join(' ')
   ].join(' ').toLowerCase();
@@ -440,22 +763,42 @@ function cryoMatchesTreatment(lot, txFilter) {
   if (!txFilter) return true;
   return cryoTreatmentFacets(lot).has(txFilter === '__none__' ? 'wt' : txFilter);
 }
+function cryoMatchesResistance(lot, resFilter) {
+  if (!resFilter) return true;
+  const tags = (lot?.resistance_tags || []).map(t => String(t || '').trim().toLowerCase()).filter(Boolean);
+  if (resFilter === '__none__') return tags.length === 0;
+  return tags.includes(resFilter);
+}
+function cryoMatchesLowStock(lot, groupRemMap) {
+  if (!cryoUi.lowStockOnly) return true;
+  const rem = cryoBatchRemaining(lot);
+  if (rem <= 0) return false;
+  const gRem = groupRemMap ? (groupRemMap.get(lot.id) ?? rem) : rem;
+  return gRem > 0 && gRem <= 2;
+}
 function cryoMatchesCell(lot, cellFilter) {
   if (!cellFilter) return true;
   return cryoNormCell(lot) === cellFilter;
 }
-function cryoMatchesAllFilters(lot) {
-  return cryoMatchesQueryAndKind(lot) && cryoMatchesCell(lot, cryoUi.cellFilter) && cryoMatchesTreatment(lot, cryoUi.treatmentFilter);
+function cryoMatchesAllFilters(lot, groupRemMap = null) {
+  const gMap = groupRemMap || (cryoUi.lowStockOnly ? cryoStockGroupRemainingMap() : null);
+  return cryoMatchesQueryAndKind(lot)
+    && cryoMatchesCell(lot, cryoUi.cellFilter)
+    && cryoMatchesTreatment(lot, cryoUi.treatmentFilter)
+    && cryoMatchesResistance(lot, cryoUi.resistanceFilter)
+    && cryoMatchesLowStock(lot, gMap);
 }
 function cryoHasActiveFilter() {
-  return !!(cryoUi.query || cryoUi.kindFilter || cryoUi.cellFilter || cryoUi.treatmentFilter);
+  return !!(cryoUi.query || cryoUi.kindFilter || cryoUi.cellFilter || cryoUi.treatmentFilter || cryoUi.resistanceFilter || cryoUi.lowStockOnly);
 }
 function cryoFacetOptions() {
   const lots = state?.frozen_batches || [];
-  // Cells available given current query + kind + treatmentFilter
+  const gMap = cryoStockGroupRemainingMap();
+  // Cells available given current query + kind + treatment + resistance + lowStock
   const cellMap = new Map();
   for (const lot of lots) {
-    if (!cryoMatchesQueryAndKind(lot) || !cryoMatchesTreatment(lot, cryoUi.treatmentFilter)) continue;
+    if (!cryoMatchesQueryAndKind(lot) || !cryoMatchesTreatment(lot, cryoUi.treatmentFilter)
+      || !cryoMatchesResistance(lot, cryoUi.resistanceFilter) || !cryoMatchesLowStock(lot, gMap)) continue;
     const key = cryoNormCell(lot);
     if (!key) continue;
     const prev = cellMap.get(key) || {key, label: lot.name.trim(), remaining: 0, batches: 0};
@@ -463,10 +806,11 @@ function cryoFacetOptions() {
     prev.batches += 1;
     cellMap.set(key, prev);
   }
-  // Treatments available given current query + kind + cellFilter
+  // Treatments available given current query + kind + cell + resistance + lowStock
   const txMap = new Map();
   for (const lot of lots) {
-    if (!cryoMatchesQueryAndKind(lot) || !cryoMatchesCell(lot, cryoUi.cellFilter)) continue;
+    if (!cryoMatchesQueryAndKind(lot) || !cryoMatchesCell(lot, cryoUi.cellFilter)
+      || !cryoMatchesResistance(lot, cryoUi.resistanceFilter) || !cryoMatchesLowStock(lot, gMap)) continue;
     const rem = cryoBatchRemaining(lot);
     for (const [key, label] of cryoTreatmentFacets(lot)) {
       const prev = txMap.get(key) || {key, label, remaining: 0, batches: 0};
@@ -475,9 +819,28 @@ function cryoFacetOptions() {
       txMap.set(key, prev);
     }
   }
+  // Resistance tags available given current query + kind + cell + treatment + lowStock
+  const resMap = new Map();
+  for (const lot of lots) {
+    if (!cryoMatchesQueryAndKind(lot) || !cryoMatchesCell(lot, cryoUi.cellFilter)
+      || !cryoMatchesTreatment(lot, cryoUi.treatmentFilter) || !cryoMatchesLowStock(lot, gMap)) continue;
+    const rem = cryoBatchRemaining(lot);
+    const tags = (lot.resistance_tags || []).map(x => String(x || '').trim()).filter(Boolean);
+    const seenInLot = new Set();
+    for (const raw of tags) {
+      const key = raw.toLowerCase();
+      if (seenInLot.has(key)) continue;
+      seenInLot.add(key);
+      const prev = resMap.get(key) || {key, label: raw, remaining: 0, batches: 0};
+      prev.remaining += rem;
+      prev.batches += 1;
+      resMap.set(key, prev);
+    }
+  }
   const cells = [...cellMap.values()].sort((a, b) => b.remaining - a.remaining || a.label.localeCompare(b.label, 'zh-Hans-CN'));
   const treatments = [...txMap.values()].sort((a, b) => b.remaining - a.remaining || a.label.localeCompare(b.label, 'zh-Hans-CN'));
-  return {cells, treatments};
+  const resistances = [...resMap.values()].sort((a, b) => b.remaining - a.remaining || a.label.localeCompare(b.label, 'zh-Hans-CN'));
+  return {cells, treatments, resistances};
 }
 
 // --- Main Workspace Rendering ---
@@ -506,9 +869,10 @@ function renderCryoWorkspace() {
     <div id="cryo-top"></div>
     <section class="cryo-filter-panel" aria-label="冻存细胞双向联动检索">
       <div class="cryo-filter-top">
-        <input id="cryo-search" type="search" value="${esc(cryoUi.query)}" placeholder="搜索细胞名称、抗性标签、特殊处理、代次、供者或格位">
+        <input id="cryo-search" type="search" value="${esc(cryoUi.query)}" placeholder="搜索细胞名称、亚克隆、抗性标签、特殊处理、代次、供者或格位">
         <div class="cryo-kind-tabs" id="cryo-kind-tabs" role="group" aria-label="按细胞类型筛选">
         </div>
+        <button type="button" class="cryo-low-toggle" id="cryo-low-stock-toggle" aria-pressed="${cryoUi.lowStockOnly}">⚡ 低库存（≤2支）</button>
         <button type="button" class="text-button" id="cryo-clear-filters" ${cryoHasActiveFilter() ? '' : 'hidden'}>清除筛选</button>
       </div>
       <div id="cryo-facets-wrap"></div>
@@ -521,8 +885,12 @@ function renderCryoWorkspace() {
     cryoUi.query = search.value.trim();
     renderCryoDynamic();
   };
+  $('#cryo-low-stock-toggle').onclick = () => {
+    cryoUi.lowStockOnly = !cryoUi.lowStockOnly;
+    renderCryoDynamic();
+  };
   $('#cryo-clear-filters').onclick = () => {
-    cryoUi.query = ''; cryoUi.kindFilter = ''; cryoUi.cellFilter = ''; cryoUi.treatmentFilter = '';
+    cryoUi.query = ''; cryoUi.kindFilter = ''; cryoUi.cellFilter = ''; cryoUi.treatmentFilter = ''; cryoUi.resistanceFilter = ''; cryoUi.lowStockOnly = false;
     search.value = '';
     renderCryoDynamic();
   };
@@ -539,6 +907,13 @@ function bindCryoKindTabs() {
     cryoUi.kindFilter = btn.dataset.cryoKind;
     renderCryoDynamic();
   });
+  const lowBtn = $('#cryo-low-stock-toggle');
+  if (lowBtn) {
+    const gMap = cryoStockGroupRemainingMap();
+    const lowCount = (state?.frozen_batches || []).filter(l => cryoBatchRemaining(l) > 0 && (gMap.get(l.id) ?? 0) <= 2).length;
+    lowBtn.setAttribute('aria-pressed', String(cryoUi.lowStockOnly));
+    lowBtn.textContent = lowCount > 0 ? `⚡ 低库存（${lowCount}）` : '⚡ 低库存（≤2支）';
+  }
 }
 
 function renderCryoDynamic() {
@@ -589,27 +964,34 @@ function renderCryoTop() {
 function renderCryoFacets() {
   const wrap = $('#cryo-facets-wrap');
   if (!wrap) return;
-  const {cells, treatments} = cryoFacetOptions();
+  const {cells, treatments, resistances} = cryoFacetOptions();
   const active = cryoHasActiveFilter();
   const risks = cryoContaminationMap();
-  const matchedLots = active ? (state?.frozen_batches || []).filter(cryoMatchesAllFilters) : [];
+  const gMap = cryoStockGroupRemainingMap();
+  const matchedLots = active ? (state?.frozen_batches || []).filter(l => cryoMatchesAllFilters(l, gMap)) : [];
   const matchedRem = matchedLots.reduce((n, l) => n + cryoBatchRemaining(l), 0);
+  const hasAnyRes = resistances.length > 0 || !!cryoUi.resistanceFilter;
 
-  wrap.innerHTML = `<div class="cryo-facets">
+  wrap.innerHTML = `<div class="cryo-facets ${hasAnyRes ? 'has-three' : ''}">
     <div class="cryo-facet-group">
-      <div class="cryo-facet-head"><span>按细胞种类 / 细胞系${cryoUi.treatmentFilter ? '（已按特殊处理联动）' : ''}</span>${cryoUi.cellFilter ? '<button type="button" class="text-button" data-clear-facet="cell">不限</button>' : ''}</div>
+      <div class="cryo-facet-head"><span>按细胞种类 / 细胞系${cryoUi.treatmentFilter || cryoUi.resistanceFilter ? '（已联动）' : ''}</span>${cryoUi.cellFilter ? '<button type="button" class="text-button" data-clear-facet="cell">不限</button>' : ''}</div>
       <div class="cryo-facet-chips">${cells.map(c => `<button type="button" class="cryo-facet-chip" data-facet-cell="${esc(c.key)}" aria-pressed="${cryoUi.cellFilter === c.key}">${esc(c.label)}<small>${c.remaining}支</small></button>`).join('') || '<span class="muted">暂无冻存细胞</span>'}</div>
     </div>
     <div class="cryo-facet-group">
-      <div class="cryo-facet-head"><span>按特殊处理${cryoUi.cellFilter ? '（已按所选细胞联动）' : ''}</span>${cryoUi.treatmentFilter ? '<button type="button" class="text-button" data-clear-facet="tx">不限</button>' : ''}</div>
+      <div class="cryo-facet-head"><span>按特殊处理${cryoUi.cellFilter || cryoUi.resistanceFilter ? '（已联动）' : ''}</span>${cryoUi.treatmentFilter ? '<button type="button" class="text-button" data-clear-facet="tx">不限</button>' : ''}</div>
       <div class="cryo-facet-chips">${treatments.map(t => `<button type="button" class="cryo-facet-chip" data-facet-tx="${esc(t.key)}" aria-pressed="${cryoUi.treatmentFilter === t.key}">${esc(t.label)}<small>${t.remaining}支</small></button>`).join('') || '<span class="muted">暂无特殊处理标签</span>'}</div>
     </div>
+    ${hasAnyRes ? `<div class="cryo-facet-group">
+      <div class="cryo-facet-head"><span>按抗性${cryoUi.cellFilter || cryoUi.treatmentFilter ? '（已联动）' : ''}</span>${cryoUi.resistanceFilter ? '<button type="button" class="text-button" data-clear-facet="res">不限</button>' : ''}</div>
+      <div class="cryo-facet-chips">${resistances.map(r => `<button type="button" class="cryo-facet-chip is-res" data-facet-res="${esc(r.key)}" aria-pressed="${cryoUi.resistanceFilter === r.key}">${esc(r.label)}<small>${r.remaining}支</small></button>`).join('') || '<span class="muted">当前筛选下无抗性标签</span>'}</div>
+    </div>` : ''}
   </div>
   ${active ? `<div class="cryo-hit-strip">
     <div><strong>命中 ${matchedLots.length} 批 · 剩余 ${matchedRem} 支</strong>${matchedLots.length ? '（点击下方库位直接定位格位）' : ''}</div>
     <div class="cryo-hit-list">${matchedLots.flatMap(lot => {
       const rem = cryoBatchRemaining(lot), placed = cryoBatchPlacedSlots(lot.id), risk = risks.get(lot.id) || {level: 'none'};
       const riskCls = risk.level === 'red' ? 'risk-red' : risk.level === 'yellow' ? 'risk-yellow' : '';
+      const cloneText = lot.subclone ? ` [${lot.subclone}]` : '';
       const txText = lot.special_treatments?.length ? ` · ${lot.special_treatments.join('/')}` : '';
       if (placed.length) {
         const byBox = new Map();
@@ -617,10 +999,10 @@ function renderCryoFacets() {
           if (!byBox.has(p.box.id)) byBox.set(p.box.id, {box: p.box, slots: []});
           byBox.get(p.box.id).slots.push(p.slot);
         }
-        return [...byBox.values()].map(g => `<button type="button" class="cryo-hit-pill ${riskCls}" data-jump-box="${esc(g.box.id)}" data-jump-slot="${esc(g.slots[0])}"><strong>${esc(lot.name)}${esc(txText)}</strong><span>${esc(cryoBoxLabel(g.box))} · ${esc(g.slots.join('、'))}（${g.slots.length}支）</span></button>`);
+        return [...byBox.values()].map(g => `<button type="button" class="cryo-hit-pill ${riskCls}" data-jump-box="${esc(g.box.id)}" data-jump-slot="${esc(g.slots[0])}"><strong>${esc(lot.name)}${esc(cloneText)}${esc(txText)}</strong><span>${esc(cryoBoxLabel(g.box))} · ${esc(g.slots.join('、'))}（${g.slots.length}支）</span></button>`);
       }
       const locLabel = lot.storage_stage === 'gradient' && rem > 0 ? '暂存盒' : (lot.location || '未定位');
-      return [`<button type="button" class="cryo-hit-pill ${riskCls}" data-jump-batch="${esc(lot.id)}"><strong>${esc(lot.name)}${esc(txText)}</strong><span>${esc(locLabel)}（剩 ${rem} 支）</span></button>`];
+      return [`<button type="button" class="cryo-hit-pill ${riskCls}" data-jump-batch="${esc(lot.id)}"><strong>${esc(lot.name)}${esc(cloneText)}${esc(txText)}</strong><span>${esc(locLabel)}（剩 ${rem} 支）</span></button>`];
     }).join('') || '<span class="muted">没有符合当前条件的冻存批次。</span>'}</div>
   </div>` : ''}`;
 
@@ -632,8 +1014,13 @@ function renderCryoFacets() {
     cryoUi.treatmentFilter = cryoUi.treatmentFilter === b.dataset.facetTx ? '' : b.dataset.facetTx;
     renderCryoDynamic();
   });
+  wrap.querySelectorAll('[data-facet-res]').forEach(b => b.onclick = () => {
+    cryoUi.resistanceFilter = cryoUi.resistanceFilter === b.dataset.facetRes ? '' : b.dataset.facetRes;
+    renderCryoDynamic();
+  });
   wrap.querySelectorAll('[data-clear-facet]').forEach(b => b.onclick = () => {
     if (b.dataset.clearFacet === 'cell') cryoUi.cellFilter = '';
+    else if (b.dataset.clearFacet === 'res') cryoUi.resistanceFilter = '';
     else cryoUi.treatmentFilter = '';
     renderCryoDynamic();
   });
@@ -681,6 +1068,7 @@ function cryoDraftFromLot(lot) {
     cell_kind: cryoBatchKind(lot),
     special_treatments: [...(lot?.special_treatments || [])],
     resistance_tags: [...(lot?.resistance_tags || [])],
+    subclone: lot?.subclone || '',
     at: (lot?.at || '').slice(0, 10) || todayStr,
     passage: lot?.passage || '',
     donor: lot?.donor || '',
@@ -704,8 +1092,13 @@ function cryoSyncCopyDraft(root = document) {
   m.draft = {
     name: v('name'),
     cell_kind: v('cell_kind'),
-    special_treatments: cryoReadTreatmentRows(form),
-    resistance_tags: cryoReadResistance(form),
+    special_treatments: cryoReadTreatmentRowValues(form),
+    resistance_tags: cryoReadResistance(form, false),
+    resistance_custom: form.querySelector('[data-res-input]')?.value || '',
+    subclone: v('subclone'),
+    subclone_seq_on: !!form.elements.namedItem('subclone_seq_on')?.checked,
+    subclone_seq_prefix: form.elements.namedItem('subclone_seq_prefix')?.value ?? (m.draft?.subclone_seq_prefix ?? '#'),
+    subclone_seq_start: form.elements.namedItem('subclone_seq_start')?.value ?? (m.draft?.subclone_seq_start ?? '1'),
     at: v('at'),
     passage: v('passage'),
     donor: v('donor'),
@@ -752,12 +1145,17 @@ async function cryoSubmitCopyForm(keepCopying = false) {
   if (!d.name) return showErr('请填写细胞名称 / 细胞系。');
   const atVal = d.at === (m.sourceAtFull || '').slice(0, 10) && (m.sourceAtFull || '').length >= 16
     ? m.sourceAtFull : d.at;
+  const seqCfg = d.subclone_seq_on && m.picks.length >= 2
+    ? {prefix: (d.subclone_seq_prefix || '#').trim() || '#', start: Number.isInteger(Number(d.subclone_seq_start)) && Number(d.subclone_seq_start) >= 0 ? Number(d.subclone_seq_start) : 1}
+    : null;
   const payload = {
     name: d.name,
     ...(m.copySource ? {source_lot_id: m.sourceLotId} : {}),
     cell_kind: d.cell_kind,
-    special_treatments: d.special_treatments || [],
-    resistance_tags: d.resistance_tags || [],
+    special_treatments: (d.special_treatments || []).map(x => String(x || '').trim()).filter(Boolean),
+    resistance_tags: [...(d.resistance_tags || []), ...cryoParseTreatmentsInput(d.resistance_custom || '')],
+    subclone: seqCfg ? '' : (d.subclone || ''),
+    ...(seqCfg ? {subclone_sequence: seqCfg} : {}),
     at: atVal,
     vials: m.picks.length,
     passage: d.passage,
@@ -880,8 +1278,9 @@ function cryoMapMarkup() {
   const lotsById = new Map((state?.frozen_batches || []).map(b => [b.id, b]));
   const toneMap = cryoToneMapForLots(state?.frozen_batches || []);
   const risks = cryoContaminationMap();
+  const groupRemMap = cryoStockGroupRemainingMap();
   const filterOn = cryoHasActiveFilter();
-  const matchedIds = new Set(filterOn ? (state?.frozen_batches || []).filter(cryoMatchesAllFilters).map(b => b.id) : []);
+  const matchedIds = new Set(filterOn ? (state?.frozen_batches || []).filter(l => cryoMatchesAllFilters(l, groupRemMap)).map(b => b.id) : []);
 
   const boxHitCount = box => Object.values(box.slots || {}).filter(e => matchedIds.has(e.batch_id)).length;
   const renderBoxItem = box => {
@@ -945,13 +1344,16 @@ function cryoMapMarkup() {
     ].filter(Boolean).join(' ');
     const txShort = lot?.special_treatments?.length ? lot.special_treatments.join('/') : '';
     const resShort = lot?.resistance_tags?.length ? lot.resistance_tags.join(' ') : '';
+    const cloneShort = (lot?.subclone || '').trim();
+    const gRem = lot ? (groupRemMap.get(lot.id) ?? cryoBatchRemaining(lot)) : 0;
+    const isLow = !!lot && gRem > 0 && gRem <= 2;
     const subTag = [resShort, txShort].filter(Boolean).join(' · ');
     const title = lot
-      ? `${key} · ${lot.name}${resShort ? ' · 抗性 ' + resShort : ''}${txShort ? ' · ' + txShort : ''}${lot.passage ? ' · ' + lot.passage : ''}${risk.level !== 'none' ? ` · 污染预警(${risk.hits}次)` : ''}`
-      : `${key} · 空位`;
-    return `<button type="button" class="${cls}" data-cryo-slot="${esc(key)}" ${lot ? `data-batch-tone="${toneMap.get(cryoLotToneKey(lot)) ?? 0}"` : ''} aria-pressed="${isSel}" title="${esc(title)}">
+      ? `${key} · ${lot.name}${cloneShort ? ' · 克隆 ' + cloneShort : ''}${resShort ? ' · 抗性 ' + resShort : ''}${txShort ? ' · ' + txShort : ''}${lot.passage ? ' · ' + lot.passage : ''}${isLow ? ` · 低库存（同类仅剩 ${gRem} 支）` : ''}${risk.level !== 'none' ? ` · 污染预警(${risk.hits}次)` : ''}`
+      : `${key} · 空位（可点击或按住拖动连选）`;
+    return `<button type="button" class="${cls}${isLow ? ' is-low-stock' : ''}" data-cryo-slot="${esc(key)}" ${lot ? `data-batch-tone="${toneMap.get(cryoLotToneKey(lot)) ?? 0}"` : ''} aria-pressed="${isSel}" title="${esc(title)}">
       ${risk.level === 'red' ? '<span class="cryo-risk-badge" aria-label="红色污染高危">⛔</span>' : risk.level === 'yellow' ? '<span class="cryo-risk-badge" aria-label="黄色污染预警">⚠</span>' : ''}
-      <span class="cryo-slot-key">${esc(key)}</span>
+      <span class="cryo-slot-head"><span class="cryo-slot-key">${esc(key)}</span>${cloneShort ? `<span class="cryo-clone-tag">${esc(cloneShort)}</span>` : ''}${isLow ? `<span class="cryo-low-tag ${gRem === 1 ? 'is-last' : ''}" aria-label="低库存剩${gRem}支">剩${gRem}</span>` : ''}</span>
       ${lot ? `<span class="cryo-slot-cell">${esc(lot.name)}</span>${subTag ? `<span class="cryo-slot-tx">${esc(subTag)}</span>` : ''}` : '<span class="cryo-slot-tx">空</span>'}
     </button>`;
   };
@@ -979,6 +1381,7 @@ function cryoMapMarkup() {
           </div>
           <div class="actions">
             <button type="button" class="text-button" id="cryo-clear-slots" ${!cryoUi.selectedSlots.size || cryoUi.mode ? 'hidden' : ''}>取消选格</button>
+            <a class="text-button" id="cryo-print-box" href="/api/cryo/box-print?box_id=${encodeURIComponent(activeBox.id)}" target="_blank" rel="noopener">打印 / 导出分布图</a>
             <button type="button" class="text-button" data-edit-box="${esc(activeBox.id)}">编辑此盒</button>
           </div>
         </div>
@@ -986,18 +1389,20 @@ function cryoMapMarkup() {
           <div class="cryo-box-grid ${dense ? 'dense' : ''}" style="grid-template-columns:${gridCols}" data-cryo-grid="${esc(activeBox.id)}">${gridInner}</div>
         </div>
         <div class="cryo-legend">
-          <span><i></i>空位</span>
+          <span><i></i>空位（可拖动连选）</span>
           <span><i class="occ"></i>已存细胞</span>
+          <span><i class="low"></i>剩1/剩2 低库存</span>
           <span><i class="yel"></i>⚠ 污染预警（1次）</span>
           <span><i class="red"></i>⛔ 污染高危（≥2次）</span>
         </div>
       </section>
-      <aside class="cryo-inspector" id="cryo-inspector">${cryoInspectorMarkup(activeBox, lotsById, risks)}</aside>
+      <aside class="cryo-inspector" id="cryo-inspector">${cryoInspectorMarkup(activeBox, lotsById, risks, groupRemMap)}</aside>
     </div>
   </div>`;
 }
 
-function cryoInspectorMarkup(box, lotsById, risks) {
+function cryoInspectorMarkup(box, lotsById, risks, groupRemMap = null) {
+  const gMap = groupRemMap || cryoStockGroupRemainingMap();
   if (cryoUi.mode) {
     if (cryoUi.mode.type === 'copy') {
       const m = cryoUi.mode;
@@ -1015,10 +1420,11 @@ function cryoInspectorMarkup(box, lotsById, risks) {
         const bx = boxesById.get(bid);
         return `<span class="cryo-slot-chip">${esc(bx ? bx.name : bid)} · ${esc(slots.join('、'))}</span>`;
       }).join('');
+      const pickLabels = m.picks.map(p => p.slot);
       return `<h3>复制到空位（已选 ${m.picks.length} 格）</h3>
         <p class="muted" style="margin:0 0 8px">已复制来自 <strong>${esc(m.sourceLabel || '')}</strong> 的信息；可直接原样写入，也可先微调代次、冻存日期等字段，复制后仍可单格单独修改。</p>
         <div class="cryo-copy-picks">
-          ${m.picks.length ? `<strong>目标格位：</strong>${picksSummary}` : '<span class="muted">请在左侧冻存盒网格中点击 1 个或多个空位（支持切换其他层/盒跨盒多选）。</span>'}
+          ${m.picks.length ? `<strong>目标格位：</strong>${picksSummary}` : '<span class="muted">请在左侧冻存盒网格中点击或按住拖动连选空位（支持切换其他层/盒跨盒多选）。</span>'}
         </div>
         <form id="cryo-copy-form" novalidate>
           <div class="two">
@@ -1028,16 +1434,18 @@ function cryoInspectorMarkup(box, lotsById, risks) {
           <datalist id="cryo-copy-cells">${cells.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
           <datalist id="cryo-copy-kinds">${kinds.map(k => `<option value="${esc(k)}">`).join('')}</datalist>
           ${cryoTreatmentRowsMarkup(d.special_treatments || [], 'cryo-copy-tx-list')}
-          ${cryoResistanceMarkup(d.resistance_tags || [])}
+          ${cryoResistanceMarkup(d.resistance_tags || [], d.resistance_custom || '')}
           <div class="two">
             <label>细胞冻存日期<input name="at" type="date" required value="${esc(d.at || todayStr)}" max="${esc(todayStr)}"></label>
             <label>细胞代次（可选）<input name="passage" maxlength="60" value="${esc(d.passage || '')}" placeholder="如 P5"></label>
           </div>
           <div class="two">
+            <label>亚克隆 / 克隆号（可选）<input name="subclone" maxlength="60" value="${esc(d.subclone || '')}" placeholder="如 #1"></label>
             <label>细胞供者来源（可选）<input name="donor" maxlength="200" value="${esc(d.donor || '')}"></label>
-            <div>${cryoSuggestedVesselMarkup(d.suggested_vessel || '')}</div>
           </div>
           ${original?.sources?.length || original?.experiment_refs?.length ? `<label class="inline-check"><input type="checkbox" name="copy_source" ${m.copySource ? 'checked' : ''}>沿用原批次登记的来源与实验关联</label>` : ''}
+          ${cryoSubcloneSeqMarkup(pickLabels, d)}
+          <div>${cryoSuggestedVesselMarkup(d.suggested_vessel || '')}</div>
           ${cryoSciCountMarkup(d.per_vial_count, d.per_vial_legacy || '')}
           <details style="margin:8px 0" ${d.labels || d.day0 || d.notes ? 'open' : ''}>
             <summary class="muted" style="cursor:pointer">管号、原代激活日与备注（可选）</summary>
@@ -1068,34 +1476,38 @@ function cryoInspectorMarkup(box, lotsById, risks) {
     const unplacedLots = (state?.frozen_batches || []).filter(l => cryoBatchUnplaced(l) > 0);
     const cells = cryoHistoryCells(), kinds = cryoHistoryKinds();
     const todayStr = boot?.today || localMinute().slice(0, 10);
+    const d = cryoUi.inlineDraft || {};
     return `<h3>直接填入 ${esc(box.name)} · ${esc(empty.join('、'))}（${empty.length} 管）</h3>
-      <p class="muted" style="margin:0 0 8px">可选择多个空位，一次登记同一批库存。选择培养来源后可查看该培养单元的关联实验。</p>
+      <p class="muted" style="margin:0 0 8px">可点选或按住拖动连选多个空位；选 ≥2 格时可一键按序号登记独立的亚克隆库存。</p>
+      ${cryoTemplateBarMarkup()}
       <form id="cryo-inline-stock-form" novalidate>
         <div class="two">
-          <label>细胞名称 / 细胞系<input name="name" required maxlength="200" list="cryo-inline-cells" ></label>
-          <label>细胞类型（可选）<input name="cell_kind" maxlength="80" list="cryo-inline-kinds" placeholder="输入或选择类型"></label>
+          <label>细胞名称 / 细胞系<input name="name" required maxlength="200" list="cryo-inline-cells" value="${esc(d.name || '')}" placeholder="输入细胞名称"></label>
+          <label>细胞类型（可选）<input name="cell_kind" maxlength="80" list="cryo-inline-kinds" value="${esc(d.cell_kind || '')}" placeholder="输入或选择类型"></label>
         </div>
         <datalist id="cryo-inline-cells">${cells.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
         <datalist id="cryo-inline-kinds">${kinds.map(k => `<option value="${esc(k)}">`).join('')}</datalist>
-        ${cryoTreatmentRowsMarkup([], 'cryo-inline-tx-list')}
-        ${cryoResistanceMarkup([])}
+        ${cryoTreatmentRowsMarkup(d.special_treatments || [], 'cryo-inline-tx-list')}
+        ${cryoResistanceMarkup(d.resistance_tags || [], d.resistance_custom || '')}
         <div class="two">
-          <label>细胞冻存日期<input name="at" type="date" required value="${esc(todayStr)}" max="${esc(todayStr)}"></label>
-          <label>细胞代次（可选）<input name="passage" maxlength="60" placeholder="如 P5"></label>
+          <label>细胞冻存日期<input name="at" type="date" required value="${esc(d.at || todayStr)}" max="${esc(todayStr)}"></label>
+          <label>细胞代次（可选）<input name="passage" maxlength="60" value="${esc(d.passage || '')}" placeholder="如 P5"></label>
         </div>
         <div class="two">
-          <label>细胞供者来源（可选）<input name="donor" maxlength="200" ></label>
-          <div>${cryoSuggestedVesselMarkup('')}</div>
+          <label>亚克隆 / 克隆号（可选）<input name="subclone" maxlength="60" value="${esc(d.subclone || '')}" placeholder="如 #1"></label>
+          <label>细胞供者来源（可选）<input name="donor" maxlength="200" value="${esc(d.donor || '')}"></label>
         </div>
-        ${cryoSourceMarkup()}
-        ${cryoSciCountMarkup(null)}
-        <details style="margin:8px 0">
+        ${cryoSourceMarkup(d.cryo_source)}
+        ${cryoSubcloneSeqMarkup(empty, d)}
+        <div>${cryoSuggestedVesselMarkup(d.suggested_vessel || '')}</div>
+        ${cryoSciCountMarkup(d.per_vial_count || null)}
+        <details style="margin:8px 0" ${d.labels || d.day0 || d.notes ? 'open' : ''}>
           <summary class="muted" style="cursor:pointer">管号、原代激活日与备注（可选）</summary>
           <div class="two" style="margin-top:6px">
-            <label>冻存管编号（逐管逗号分开）<input name="labels" maxlength="1000"></label>
-            <label>原代原激活日<input name="day0" type="date"></label>
+            <label>冻存管编号（逐管逗号分开）<input name="labels" maxlength="1000" value="${esc(d.labels || '')}"></label>
+            <label>原代原激活日<input name="day0" type="date" value="${esc(d.day0 || '')}"></label>
           </div>
-          <label>备注<textarea name="notes" maxlength="5000"></textarea></label>
+          <label>备注<textarea name="notes" maxlength="5000">${esc(d.notes || '')}</textarea></label>
         </details>
         <p role="alert" class="lab-error" id="cryo-inline-error" hidden></p>
         <div class="actions" style="margin-top:8px">
@@ -1120,10 +1532,18 @@ function cryoInspectorMarkup(box, lotsById, risks) {
   const sameBatch = entries.every(x => x.lot.id === lot.id);
   const risk = risks.get(lot.id) || {level: 'none', hits: 0, events: []};
   const rem = cryoBatchRemaining(lot), related = cryoRelatedGroups(lot.id);
+  const gRem = gMap.get(lot.id) ?? rem;
+  const lowStockHtml = gRem > 0 && gRem <= 2
+    ? `<div class="cryo-alert-box is-low-stock"><strong>${gRem === 1 ? '⚡ 仅剩最后 1 支' : `⚡ 低库存提示：同类细胞（同亚克隆/处理）仅剩 ${gRem} 支`}</strong></div>`
+    : '';
 
+  const cleanCandidates = risk.level === 'yellow' ? cryoCleanThawCandidatesForYellow(lot.id) : [];
   const riskHtml = risk.level !== 'none' ? `<div class="cryo-alert-box risk-${risk.level}">
     <strong>${risk.level === 'red' ? `⛔ 污染高危标记（关联 ${risk.hits} 次污染）` : '⚠ 污染预警标记（关联 1 次污染）'}</strong>
-    <div>${risk.events.map(ev => `${esc(ev.reason)}：${esc(ev.sourceName)}（${esc((ev.sourceAt || '').slice(0, 10))}）${ev.contamination.kind ? ' · ' + esc(ev.contamination.kind) : ''}${ev.contamination.notes ? ' · ' + esc(ev.contamination.notes) : ''}`).join('<br>')}</div>
+    <div>${risk.events.map(ev => `${esc(ev.reason)}：${esc(ev.sourceName)}（${esc((ev.sourceAt || '').slice(0, 10))}）${ev.contamination.kind ? ' · ' + esc(ev.contamination.kind) : ''}${ev.contamination.notes ? ' · ' + esc(ev.contamination.notes) : ''} <button type="button" class="text-button" data-mark-contamination="${esc(ev.withdrawalId)}">修改/误标撤销</button>`).join('<br>')}</div>
+    ${risk.level === 'yellow' ? `<div style="margin-top:6px">${cleanCandidates.length
+      ? `<button type="button" class="button secondary" data-open-clear-yellow="${esc(lot.id)}">同批次复苏无污染 · 解除黄色预警</button>`
+      : '<small>登记同批次的独立复苏记录后，可在此或「全部冻存批次」中核对该记录并解除黄色预警。</small>'}</div>` : ''}
   </div>` : '';
 
   const tierRow = (title, items) => {
@@ -1135,20 +1555,23 @@ function cryoInspectorMarkup(box, lotsById, risks) {
         const r = risks.get(x.lot.id) || {level: 'none'};
         const badge = r.level === 'red' ? ' ⛔' : r.level === 'yellow' ? ' ⚠' : '';
         const tx = x.lot.special_treatments?.length ? ` · ${x.lot.special_treatments.join('/')}` : '';
+        const cl = x.lot.subclone ? ` [${x.lot.subclone}]` : '';
         const jump = p ? `<button type="button" class="text-button" data-jump-box="${esc(p.box.id)}" data-jump-slot="${esc(p.slot)}">${esc(cryoBoxLabel(p.box))} ${esc(p.slot)}</button>` : `<span>${esc(x.lot.storage_stage === 'gradient' ? '暂存盒' : (x.lot.location || '未定位'))}</span>`;
-        return `<li><span><strong>${esc(x.lot.name)}${esc(tx)}</strong>${badge} · ${esc((x.lot.at || '').slice(0, 10))} · 剩 ${x.remaining} 支</span>${jump}</li>`;
+        return `<li><span><strong>${esc(x.lot.name)}${esc(cl)}${esc(tx)}</strong>${badge} · ${esc((x.lot.at || '').slice(0, 10))} · 剩 ${x.remaining} 支</span>${jump}</li>`;
       }).join('')}</ul>` : '<p class="muted" style="margin:4px 0 0">暂无其他关联批次</p>'}
     </div>`;
   };
 
   return `<h3>${esc(lot.name)}${lot.cell_kind ? ` <small class="muted">${esc(lot.cell_kind)}</small>` : ''}</h3>
     <p class="muted" style="margin-bottom:6px">${esc(cryoBoxLabel(box))} · 格位 ${esc(occupied.join('、'))}${first.entry.vial_label ? ' · 管号 ' + esc(first.entry.vial_label) : ''}</p>
-    ${(lot.special_treatments || []).length || (lot.resistance_tags || []).length ? `<div>${(lot.resistance_tags || []).map(tag => `<span class="cryo-res-badge">抗性 ${esc(tag)}</span>`).join('')}${(lot.special_treatments || []).map(tx => `<span class="cryo-tx-badge">${esc(tx)}</span>`).join('')}</div>` : ''}
+    ${lot.subclone || (lot.special_treatments || []).length || (lot.resistance_tags || []).length ? `<div>${lot.subclone ? `<span class="cryo-clone-badge">克隆 ${esc(lot.subclone)}</span>` : ''}${(lot.resistance_tags || []).map(tag => `<span class="cryo-res-badge">抗性 ${esc(tag)}</span>`).join('')}${(lot.special_treatments || []).map(tx => `<span class="cryo-tx-badge">${esc(tx)}</span>`).join('')}</div>` : ''}
+    ${lowStockHtml}
     ${riskHtml}
     ${!sameBatch ? '<p class="muted">当前多选了不同批次的格位；移位可批量执行，取出/复苏请只选同一批次。</p>' : ''}
     <div class="cryo-meta-grid">
       <div class="cryo-meta-item"><small>冻存时间</small><strong>${esc((lot.at || '').replace('T', ' '))}</strong></div>
       <div class="cryo-meta-item"><small>本批余量</small><strong>剩 ${rem} / ${lot.vials} 管</strong></div>
+      <div class="cryo-meta-item"><small>亚克隆 / 克隆号</small><strong>${esc(lot.subclone || '未记录')}</strong></div>
       <div class="cryo-meta-item"><small>细胞代次</small><strong>${esc(lot.passage || '未记录')}</strong></div>
       <div class="cryo-meta-item"><small>供者来源</small><strong>${esc(lot.donor || '未记录')}</strong></div>
       <div class="cryo-meta-item"><small>管内细胞数</small><strong>${esc(cryoFormatCount(lot) || '未记录')}</strong></div>
@@ -1160,8 +1583,9 @@ function cryoInspectorMarkup(box, lotsById, risks) {
       <button type="button" class="button secondary" id="cryo-slot-take" ${!sameBatch || !rem ? 'disabled' : ''}>仅取出</button>
       <button type="button" class="button secondary" id="cryo-slot-copy" ${!sameBatch ? 'disabled' : ''}>复制到空位</button>
       <button type="button" class="button secondary" id="cryo-slot-move">移位</button>
-      <button type="button" class="button danger" id="cryo-slot-discard" ${!sameBatch || !rem ? 'disabled' : ''}>弃置 / 污染放弃</button>
       <button type="button" class="text-button" id="cryo-slot-edit" ${!sameBatch ? 'disabled' : ''}>编辑信息</button>
+      <button type="button" class="text-button" id="cryo-slot-delete">删除此格记录</button>
+      <button type="button" class="button danger" id="cryo-slot-discard" ${!sameBatch || !rem ? 'disabled' : ''}>污染弃置</button>
     </div>
     ${lot.sources?.length ? `<p class="muted">来源：${lot.sources.map(s => `${esc(s.name + ' / ' + s.well)} ${typeof lineageUnitButton === 'function' ? lineageUnitButton(s.id, s.well) : ''}`).join('；')}</p>` : ''}
     ${(() => {
@@ -1173,7 +1597,7 @@ function cryoInspectorMarkup(box, lotsById, risks) {
       <h4>关联细胞库存余量</h4>
       ${tierRow('强相关（同日同组）', related.strong)}
       ${tierRow('弱相关（同细胞同处理 · 不同日）', related.weak)}
-      ${tierRow('更弱相关（同细胞 · 其他处理）', related.weaker)}
+      ${tierRow('更弱相关（同细胞 · 其他处理/亚克隆）', related.weaker)}
     </section>`;
 }
 
@@ -1181,7 +1605,7 @@ function bindCryoMap(root) {
   root.querySelectorAll('[data-select-box]').forEach(b => b.onclick = () => {
     cryoSyncCopyDraft(root);
     cryoUi.boxId = b.dataset.selectBox;
-    if (!cryoUi.mode) cryoUi.selectedSlots.clear();
+    if (!cryoUi.mode) { cryoUi.selectedSlots.clear(); cryoUi.inlineDraft = null; }
     renderCryoBody();
   });
   root.querySelectorAll('[data-add-rack]').forEach(b => b.onclick = () => openCryoManageDialog('rack', null, {device_id: b.dataset.addRack}));
@@ -1207,9 +1631,96 @@ function bindCryoMap(root) {
   if (!activeBox) return;
 
   const clearBtn = root.querySelector('#cryo-clear-slots');
-  if (clearBtn) clearBtn.onclick = () => { cryoUi.selectedSlots.clear(); renderCryoBody(); };
+  if (clearBtn) clearBtn.onclick = () => { cryoUi.selectedSlots.clear(); cryoUi.inlineDraft = null; renderCryoBody(); };
+
+  let cryoDragState = null;
+  let suppressSlotClick = false;
+  const gridEl = root.querySelector('.cryo-box-grid');
+  if (gridEl) {
+    const applyDragSlot = (btn) => {
+      if (!cryoDragState || !btn || !btn.classList.contains('empty')) return;
+      const key = btn.dataset.cryoSlot;
+      if (!key || cryoDragState.touched.has(key)) return;
+      if (cryoDragState.limit !== null && cryoDragState.add && cryoDragState.baseCount + cryoDragState.touched.size >= cryoDragState.limit) return;
+      cryoDragState.touched.add(key);
+      btn.classList.toggle('is-selected', cryoDragState.add);
+    };
+    gridEl.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      const btn = e.target.closest('button.cryo-slot.empty');
+      if (!btn) return;
+      const key = btn.dataset.cryoSlot;
+      const m = cryoUi.mode;
+      let alreadySel = false, limit = null, baseCount = 0;
+      if (m) {
+        alreadySel = m.picks.some(p => p.box_id === activeBox.id && p.slot === key);
+        if (m.type === 'place') {
+          limit = cryoBatchUnplaced((state.frozen_batches || []).find(b => b.id === m.lotId));
+          baseCount = m.picks.length;
+        } else if (m.type === 'move') {
+          limit = m.from.length;
+          baseCount = m.picks.length;
+        }
+      } else {
+        alreadySel = cryoUi.selectedSlots.has(key);
+      }
+      cryoDragState = {add: !alreadySel, touched: new Set([key]), moved: false, limit, baseCount};
+    });
+    gridEl.addEventListener('pointerover', e => {
+      if (!cryoDragState) return;
+      const btn = e.target.closest('button.cryo-slot.empty');
+      if (!btn) return;
+      if (!cryoDragState.touched.has(btn.dataset.cryoSlot)) {
+        cryoDragState.moved = true;
+        applyDragSlot(btn);
+      }
+    });
+    const finishDrag = () => {
+      if (!cryoDragState) return;
+      const st = cryoDragState;
+      cryoDragState = null;
+      if (!st.moved || st.touched.size <= 1) return;
+      suppressSlotClick = true;
+      setTimeout(() => { suppressSlotClick = false; }, 0);
+      const m = cryoUi.mode;
+      if (m) {
+        if (m.type === 'copy') cryoSyncCopyDraft(root);
+        for (const k of st.touched) {
+          const idx = m.picks.findIndex(p => p.box_id === activeBox.id && p.slot === k);
+          if (st.add && idx < 0) m.picks.push({box_id: activeBox.id, slot: k});
+          else if (!st.add && idx >= 0) m.picks.splice(idx, 1);
+        }
+      } else {
+        const currentSel = [...cryoUi.selectedSlots];
+        const hasOcc = currentSel.some(k => activeBox.slots?.[k]);
+        const hasEmpty = currentSel.some(k => !activeBox.slots?.[k]);
+        if (hasEmpty) cryoSyncInlineDraft(root);
+        if (hasOcc) { cryoUi.selectedSlots = new Set(); cryoUi.inlineDraft = null; }
+        for (const k of st.touched) {
+          if (st.add) cryoUi.selectedSlots.add(k);
+          else cryoUi.selectedSlots.delete(k);
+        }
+        if (!cryoUi.selectedSlots.size) cryoUi.inlineDraft = null;
+      }
+      renderCryoBody();
+    };
+    gridEl.addEventListener('pointerdown', () => {
+      if (!cryoDragState) return;
+      const client = new AbortController();
+      window.addEventListener('pointerup', () => {
+        client.abort();
+        if (gridEl.isConnected) finishDrag();
+      }, {signal: client.signal});
+      window.addEventListener('pointercancel', () => {
+        client.abort();
+        cryoDragState = null;
+        if (gridEl.isConnected) renderCryoBody();
+      }, {signal: client.signal});
+    });
+  }
 
   root.querySelectorAll('[data-cryo-slot]').forEach(btn => btn.onclick = e => {
+    if (suppressSlotClick) { suppressSlotClick = false; return; }
     const key = btn.dataset.cryoSlot;
     const occupied = !!activeBox.slots?.[key];
     if (cryoUi.mode) {
@@ -1232,6 +1743,7 @@ function bindCryoMap(root) {
     const hasOcc = currentSel.some(k => activeBox.slots?.[k]);
     const hasEmpty = currentSel.some(k => !activeBox.slots?.[k]);
     if (occupied) {
+      cryoUi.inlineDraft = null;
       if (hasEmpty || (!e.shiftKey && !cryoUi.selectedSlots.has(key) && currentSel.length > 0 && activeBox.slots?.[currentSel[0]]?.batch_id !== activeBox.slots[key].batch_id)) {
         cryoUi.selectedSlots = new Set([key]);
       } else if (cryoUi.selectedSlots.has(key)) {
@@ -1240,18 +1752,26 @@ function bindCryoMap(root) {
         cryoUi.selectedSlots.add(key);
       }
     } else {
-      if (hasOcc) cryoUi.selectedSlots = new Set([key]);
-      else if (cryoUi.selectedSlots.has(key)) cryoUi.selectedSlots.delete(key);
-      else cryoUi.selectedSlots.add(key);
+      if (hasEmpty) cryoSyncInlineDraft(root);
+      if (hasOcc) { cryoUi.selectedSlots = new Set([key]); cryoUi.inlineDraft = null; }
+      else if (cryoUi.selectedSlots.has(key)) {
+        cryoUi.selectedSlots.delete(key);
+        if (!cryoUi.selectedSlots.size) cryoUi.inlineDraft = null;
+      } else {
+        cryoUi.selectedSlots.add(key);
+      }
     }
     renderCryoBody();
   });
 
   const copyForm = root.querySelector('#cryo-copy-form');
   if (copyForm) {
+    const pickLabels = (cryoUi.mode?.picks || []).map(p => p.slot);
     cryoBindSuggestedVessel(copyForm);
-    cryoBindTreatmentRows(copyForm);
+    cryoBindTreatmentRows(copyForm, () => cryoSyncCopyDraft(root));
     cryoBindResistance(copyForm, () => cryoSyncCopyDraft(root));
+    cryoBindSubcloneSeq(copyForm, pickLabels, () => cryoSyncCopyDraft(root));
+    cryoGuardFormEnter(copyForm);
     copyForm.addEventListener('input', () => cryoSyncCopyDraft(root));
     copyForm.addEventListener('change', () => cryoSyncCopyDraft(root));
     copyForm.onsubmit = async e => {
@@ -1266,9 +1786,15 @@ function bindCryoMap(root) {
 
   const inlineForm = root.querySelector('#cryo-inline-stock-form');
   if (inlineForm) {
+    const emptySlotsNow = [...cryoUi.selectedSlots].filter(k => !activeBox.slots?.[k]);
     cryoBindSuggestedVessel(inlineForm);
-    cryoBindTreatmentRows(inlineForm);
-    cryoBindResistance(inlineForm);
+    cryoBindTreatmentRows(inlineForm, () => cryoSyncInlineDraft(root));
+    cryoBindResistance(inlineForm, () => cryoSyncInlineDraft(root));
+    cryoBindSubcloneSeq(inlineForm, emptySlotsNow, () => cryoSyncInlineDraft(root));
+    cryoBindTemplateBar(root, inlineForm, () => cryoSyncInlineDraft(root), () => { cryoSyncInlineDraft(root); renderCryoBody(); });
+    cryoGuardFormEnter(inlineForm);
+    inlineForm.addEventListener('input', () => cryoSyncInlineDraft(root));
+    inlineForm.addEventListener('change', () => cryoSyncInlineDraft(root));
     inlineForm.onsubmit = async e => {
       e.preventDefault();
       if (busy) return;
@@ -1276,10 +1802,13 @@ function bindCryoMap(root) {
       const errEl = inlineForm.querySelector('#cryo-inline-error');
       const v = n => (inlineForm.elements.namedItem(n)?.value || '').trim();
       if (!slots.length) { errEl.textContent = '请先在左侧选择至少一个空位。'; errEl.hidden = false; return; }
+      const seqCfg = cryoReadSubcloneSeq(inlineForm, slots.length);
       const payload = {
         name: v('name'), cell_kind: v('cell_kind'),
         special_treatments: cryoReadTreatmentRows(inlineForm),
         resistance_tags: cryoReadResistance(inlineForm),
+        subclone: seqCfg ? '' : v('subclone'),
+        ...(seqCfg ? {subclone_sequence: seqCfg} : {}),
         at: v('at'), vials: slots.length, passage: v('passage'), donor: v('donor'),
         suggested_vessel: cryoReadSuggestedVessel(inlineForm), per_vial_count: cryoReadSciCount(inlineForm),
         labels: v('labels'), day0: v('day0'), notes: v('notes'),
@@ -1291,8 +1820,11 @@ function bindCryoMap(root) {
         const res = await api('/api/command', {action: 'cryo_stock_create', revision: state.revision, payload});
         state = res.state;
         cryoUi.selectedSlots.clear();
+        cryoUi.inlineDraft = null;
         renderCryoDynamic();
-        toast(`已直接写入 ${slots.length} 格（${slots.join('、')}）。`);
+        toast(seqCfg
+          ? `已按序号生成 ${slots.length} 个独立亚克隆（${slots.map((s, i) => `${s} ${seqCfg.prefix}${seqCfg.start + i}`).join('、')}）。`
+          : `已直接写入 ${slots.length} 格（${slots.join('、')}）。`);
       } catch (err) { errEl.textContent = err.message; errEl.hidden = false; }
       finally { busy = false; if (typeof renderUndoControl === 'function') renderUndoControl(); }
     };
@@ -1331,12 +1863,31 @@ function bindCryoMap(root) {
     cryoUi.mode = {type: 'move', from: occupiedSel.map(slot => ({box_id: activeBox.id, slot, batch_id: activeBox.slots[slot].batch_id})), picks: []};
     renderCryoBody();
   };
+  const deleteBtn = root.querySelector('#cryo-slot-delete');
+  if (deleteBtn && occupiedSel.length) deleteBtn.onclick = async () => {
+    if (busy) return;
+    if (!confirm(`仅删除 ${occupiedSel.join('、')} 的错误登记记录并释放空位（不记为污染，不会影响同批次或其他格位）？`)) return;
+    busy = true;
+    try {
+      const res = await api('/api/command', {
+        action: 'cryo_delete_slots', revision: state.revision,
+        payload: {slots: occupiedSel.map(slot => ({box_id: activeBox.id, slot}))}
+      });
+      state = res.state;
+      cryoUi.selectedSlots.clear();
+      renderCryoDynamic();
+      toast(`已删除 ${occupiedSel.join('、')} 的格位记录（未触发污染标记），可随时撤销。`);
+    } catch (err) { toast(err.message, true); }
+    finally { busy = false; if (typeof renderUndoControl === 'function') renderUndoControl(); }
+  };
   const discardBtn = root.querySelector('#cryo-slot-discard');
   if (discardBtn && firstLot) discardBtn.onclick = () => openCryoRemovalDialog(firstLot, occupiedSel.map(slot => ({box_id: activeBox.id, slot})));
   const editBtn = root.querySelector('#cryo-slot-edit');
   if (editBtn && firstLot) editBtn.onclick = () => openCryoBatchEditDialog(firstLot, {
     box: activeBox, slots: occupiedSel, slot: occupiedSel[0], entry: occupiedSel.length === 1 ? firstEntry : null
   });
+  root.querySelectorAll('[data-open-clear-yellow]').forEach(b => b.onclick = () => openCryoClearYellowDialog({lotId: b.dataset.openClearYellow}));
+  root.querySelectorAll('[data-mark-contamination]').forEach(b => b.onclick = () => openCryoContaminationDialog(b.dataset.markContamination));
 
   root.querySelectorAll('[data-jump-box]').forEach(b => b.onclick = () => cryoJumpToSlot(b.dataset.jumpBox, b.dataset.jumpSlot));
   if (typeof bindLineageButtons === 'function') bindLineageButtons(root);
@@ -1344,10 +1895,12 @@ function bindCryoMap(root) {
 }
 
 function cryoBatchesMarkup() {
+  const byId = new Map((state.frozen_batches || []).map(l => [l.id, l]));
   const risks = cryoContaminationMap();
+  const gMap = cryoStockGroupRemainingMap();
   const rows = [...(state?.frozen_batches || [])]
     .sort((a, b) => (b.at || '').localeCompare(a.at || '') || (b.recorded_at || '').localeCompare(a.recorded_at || ''))
-    .filter(cryoMatchesAllFilters)
+    .filter(l => cryoMatchesAllFilters(l, gMap))
     .filter(lot => {
       const rem = cryoBatchRemaining(lot), unp = cryoBatchUnplaced(lot), placed = cryoBatchPlacedSlots(lot.id).length;
       if (cryoUi.batchStageFilter === 'gradient') return lot.storage_stage === 'gradient' && unp > 0;
@@ -1362,6 +1915,10 @@ function cryoBatchesMarkup() {
   }
   return rows.map(f => {
     const rem = cryoBatchRemaining(f), placed = cryoBatchPlacedSlots(f.id), unp = cryoBatchUnplaced(f);
+    const gRem = gMap.get(f.id) ?? rem;
+    const lowBadge = rem > 0 && gRem <= 2
+      ? `<span class="cryo-low-pill ${gRem === 1 ? 'is-last' : ''}">${gRem === 1 ? '⚡ 仅剩最后 1 支' : `⚡ 低库存 · 剩 ${gRem} 支`}</span>`
+      : '';
     const risk = risks.get(f.id) || {level: 'none', hits: 0, events: []};
     const riskCls = risk.level === 'red' ? 'risk-red' : risk.level === 'yellow' ? 'risk-yellow' : '';
     const related = cryoRelatedGroups(f.id);
@@ -1371,11 +1928,11 @@ function cryoBatchesMarkup() {
     return `<details class="panel cryo-batch-card ${riskCls}" data-batch-card="${esc(f.id)}">
       <summary>
         ${risk.level === 'red' ? '⛔ ' : risk.level === 'yellow' ? '⚠ ' : ''}
-        <strong>${esc(f.name)}</strong>${f.resistance_tags?.length ? ' · 抗性 ' + esc(f.resistance_tags.join('/')) : ''}${f.special_treatments?.length ? ' · ' + esc(f.special_treatments.join('/')) : ''}${f.passage ? ' · ' + esc(f.passage) : ''} · ${f.vials} 管 · ${esc((f.at || '').replace('T', ' '))} · ${esc(f.location || '位置未记录')} · 剩余 ${rem} 管
+        <strong>${esc(f.name)}</strong>${f.subclone ? ' · 克隆 ' + esc(f.subclone) : ''}${f.resistance_tags?.length ? ' · 抗性 ' + esc(f.resistance_tags.join('/')) : ''}${f.special_treatments?.length ? ' · ' + esc(f.special_treatments.join('/')) : ''}${f.passage ? ' · ' + esc(f.passage) : ''} · ${f.vials} 管 · ${esc((f.at || '').replace('T', ' '))} · ${esc(f.location || '位置未记录')} · 剩余 ${rem} 管 ${lowBadge}
       </summary>
       ${risk.level !== 'none' ? `<div class="cryo-alert-box risk-${risk.level}"><strong>${risk.level === 'red' ? `⛔ 污染高危（关联 ${risk.hits} 次污染）` : '⚠ 污染预警（关联 1 次污染）'}</strong>：${risk.events.map(ev => esc(ev.reason + ' - ' + ev.sourceName + ' ' + (ev.sourceAt || '').slice(0, 10))).join('；')}</div>` : ''}
       <div class="cryo-meta-grid">
-        <div class="cryo-meta-item"><small>细胞类型 / 抗性 / 特殊处理</small><strong>${esc([cryoBatchKind(f) || '未分类', ...(f.resistance_tags || []).map(t => '抗性 ' + t), ...(f.special_treatments || [])].join(' · '))}</strong></div>
+        <div class="cryo-meta-item"><small>细胞类型 / 亚克隆 / 抗性 / 特殊处理</small><strong>${esc([cryoBatchKind(f) || '未分类', f.subclone ? '克隆 ' + f.subclone : '', ...(f.resistance_tags || []).map(t => '抗性 ' + t), ...(f.special_treatments || [])].filter(Boolean).join(' · '))}</strong></div>
         <div class="cryo-meta-item"><small>代次 / 供者来源</small><strong>${esc([f.passage || '未填代次', f.donor || '未填供者'].join(' · '))}</strong></div>
         <div class="cryo-meta-item"><small>管内细胞数</small><strong>${esc(cryoFormatCount(f) || '未记录')}</strong></div>
         <div class="cryo-meta-item"><small>复苏容器备注</small><strong>${esc(f.suggested_vessel || '未记录')}</strong></div>
@@ -1391,7 +1948,11 @@ function cryoBatchesMarkup() {
       </div>
       ${rem > 0 ? `<button type="button" class="button secondary" data-withdraw-lot="${esc(f.id)}">登记取出</button>` : ''}
       ${(state.frozen_withdrawals || []).filter(w => w.lot_id === f.id).map(w => `<p>${esc(w.at.replace('T', ' '))} · ${w.discarded ? '弃置' : w.mode === 'thaw' ? '取出复苏' : '取出'} ${esc(w.vials)} 管
-        ${w.notes ? ' · ' + esc(w.notes) : ''} <button type="button" class="text-button" data-flag-withdrawal="${esc(w.id)}">${w.contamination ? '查看 / 修改污染标记' : '标记污染'}</button></p>`).join('')}
+        ${w.notes ? ' · ' + esc(w.notes) : ''}${w.medium ? ' · 培养基 ' + esc(mediumSummary(w.medium)) : ''}
+        ${w.clean_verification ? ' · 已核对无污染 ' + esc(w.clean_verification.at) + ' ' + esc(w.clean_verification.notes || '') : ''}
+        ${w.contamination?.cleared_by_clean_thaw ? ' · 黄色预警已通过复苏记录解除 ' + esc(w.contamination.cleared_by_clean_thaw.at) : ''}
+        ${cryoCanClearYellowWithWithdrawal(w.id, risks, byId) ? `<button type="button" class="text-button" data-clear-by-withdrawal="${esc(w.id)}">核对复苏记录并解除黄色预警</button>` : ''}
+        <button type="button" class="text-button" data-flag-withdrawal="${esc(w.id)}">${w.contamination ? '查看 / 修改污染标记' : '标记污染'}</button></p>`).join('')}
       <p>冻存管编号：${esc(f.labels || '未记录')}</p>
       ${f.sources?.length ? `<p>来源：${esc(f.sources.map(src => [src.name, src.well].join(' / ')).join('、'))}</p>${f.sources.map(s => `<p>${esc(s.name + ' / ' + s.well)}${s.group_name ? ' · ' + esc(s.group_name) : ''} · Day 0 ${esc(s.snapshot?.day0 || '未记录')}　${typeof lineageUnitButton === 'function' ? lineageUnitButton(s.id, s.well) : ''}</p>`).join('')}` : '<p class="muted">直接盘点录入的历史冻存库存</p>'}
       ${f.transfer_id ? `<button type="button" class="text-button" data-lineage="${esc(f.transfer_id)}">查看同次培养流转</button>` : ''}
@@ -1435,6 +1996,7 @@ function bindCryoBatches(root) {
     const lot = (state.frozen_batches || []).find(x => x.id === b.dataset.withdrawLot);
     if (lot) openCryoRemovalDialog(lot, [], {mode: 'take'});
   });
+  root.querySelectorAll('[data-clear-by-withdrawal]').forEach(b => b.onclick = () => openCryoClearYellowDialog({withdrawalId: b.dataset.clearByWithdrawal}));
   root.querySelectorAll('[data-flag-withdrawal]').forEach(b => b.onclick = () => openCryoContaminationDialog(b.dataset.flagWithdrawal));
 }
 
@@ -1711,6 +2273,7 @@ function openCryoStockDialog(preselectedSlots = []) {
   dialog.innerHTML = `<form id="cryo-stock-form" novalidate>
     <div class="dialog-head"><div><span class="eyebrow">CRYO INVENTORY</span><h2>登记已有冻存细胞</h2></div><button type="button" class="icon-button" data-cryo-close aria-label="关闭">×</button></div>
     ${hasSlots ? `<p class="notice" style="margin:0 0 10px">将直接落入：<strong>${esc(boxLabel)} · ${esc(preselectedSlots.map(s => s.slot).join('、'))}</strong>（${preselectedSlots.length} 管）</p>` : ''}
+    <div id="cryo-stock-tpl-slot">${cryoTemplateBarMarkup()}</div>
     <div class="two">
       <label>细胞名称 / 细胞系<input name="name" required maxlength="200" list="cryo-cell-list" ></label>
       <label>细胞类型（可选）<input name="cell_kind" maxlength="80" list="cryo-kind-list" placeholder="输入或选择类型"></label>
@@ -1725,8 +2288,9 @@ function openCryoStockDialog(preselectedSlots = []) {
     </div>
     <div class="two">
       <label>细胞代次（可选）<input name="passage" maxlength="60" placeholder="如 P5"></label>
-      <label>细胞供者来源（可选）<input name="donor" maxlength="200" ></label>
+      <label>亚克隆 / 克隆号（可选）<input name="subclone" maxlength="60" placeholder="如 #1"></label>
     </div>
+    <label>细胞供者来源（可选）<input name="donor" maxlength="200"></label>
     <div class="two">${cryoSuggestedVesselMarkup('')}</div>
     ${cryoSourceMarkup()}
         ${cryoSciCountMarkup(null)}
@@ -1748,9 +2312,18 @@ function openCryoStockDialog(preselectedSlots = []) {
   </form>`;
 
   const form = dialog.querySelector('form'), errEl = dialog.querySelector('#cryo-stock-error');
+  cryoGuardFormEnter(form);
   cryoBindSuggestedVessel(form);
   cryoBindTreatmentRows(form);
   cryoBindResistance(form);
+  const rebindStockTpl = () => {
+    const slot = dialog.querySelector('#cryo-stock-tpl-slot');
+    if (slot) {
+      slot.innerHTML = cryoTemplateBarMarkup();
+      cryoBindTemplateBar(slot, form, null, rebindStockTpl);
+    }
+  };
+  cryoBindTemplateBar(dialog.querySelector('#cryo-stock-tpl-slot'), form, null, rebindStockTpl);
   dialog.querySelectorAll('[data-cryo-close]').forEach(b => b.onclick = () => dialog.close());
 
   if (!hasSlots) {
@@ -1800,6 +2373,7 @@ function openCryoStockDialog(preselectedSlots = []) {
     const payload = {
       name: v('name'), cell_kind: v('cell_kind'), special_treatments: cryoReadTreatmentRows(form),
       resistance_tags: cryoReadResistance(form),
+      subclone: v('subclone'),
       at: v('at'), vials, passage: v('passage'), donor: v('donor'),
       suggested_vessel: cryoReadSuggestedVessel(form), per_vial_count: cryoReadSciCount(form),
       labels: v('labels'), day0: v('day0'), notes: v('notes'),
@@ -1822,6 +2396,37 @@ function openCryoStockDialog(preselectedSlots = []) {
   dialog.showModal();
 }
 
+function cryoLastMedium(lot) {
+  const present = m => m && Object.values(m).some(v => Array.isArray(v) ? v.length : v != null && v !== '' && v !== 'unknown');
+  const candidates = [];
+  const group = cryoStockGroupKey(lot);
+  const peers = new Set((state.frozen_batches || []).filter(b => cryoStockGroupKey(b) === group).map(b => b.id));
+  for (const w of [...(state.frozen_withdrawals || [])].reverse()) {
+    if (!w.discarded && (w.mode === 'thaw' || w.destination) && peers.has(w.lot_id) && present(w.medium)) {
+      candidates.push({medium: w.medium, at: w.at, label: '复苏记录 ' + w.at.replace('T', ' ')});
+    }
+  }
+  for (const src of lot.sources || []) {
+    if (present(src.snapshot?.medium)) candidates.push({medium: src.snapshot.medium, at: lot.at, label: '冻存来源 ' + [src.name, src.well].filter(Boolean).join(' / ')});
+  }
+  for (const container of state.containers || []) {
+    for (const [key, w] of Object.entries(container.wells || {})) {
+      if (w.cell && cryoNormCell({name: w.cell}) === cryoNormCell(lot) && present(w.medium)) {
+        candidates.push({medium: w.medium, at: w.introduced_at || container.created_at, label: [container.name, key].join(' / ')});
+      }
+    }
+  }
+  // Thaws are recorded to the minute. At equal times prefer the latest explicit thaw entry.
+  candidates.sort((a, b) => (b.at || '').slice(0, 16).localeCompare((a.at || '').slice(0, 16)));
+  return candidates[0] || null;
+}
+
+function cryoThawMediumMarkup(hint) {
+  return `<details ${hint ? 'open' : ''}><summary>本次复苏培养基（可选）</summary>
+    ${hint ? `<label class="inline-check"><input type="checkbox" name="apply_medium" checked>登记以下培养基，来源为${esc(hint.label)}</label>` : ''}
+    ${mediumEditorMarkup([{medium: hint?.medium}], null, false, 'thaw-')}</details>`;
+}
+
 function openCryoRemovalDialog(lot, preselectedSlots = [], options = {}) {
   const dialog = cryoDialog();
   if (!dialog || !lot) return;
@@ -1838,10 +2443,14 @@ function openCryoRemovalDialog(lot, preselectedSlots = [], options = {}) {
   const label = {discard: '弃置', take: '取出', thaw: '取出复苏'}[mode];
   const defaultReason = options.defaultReason || '';
   const defaultContam = options.contaminationDefault === true;
+  const groupRemaining = cryoStockGroupRemainingMap().get(lot.id) ?? rem;
+  const mediumHint = mode === 'thaw' ? cryoLastMedium(lot) : null;
 
   dialog.innerHTML = `<form id="cryo-discard-form" novalidate>
     <div class="dialog-head"><div><h2>登记${label}冻存管</h2></div><button type="button" class="icon-button" data-cryo-close aria-label="关闭">×</button></div>
     <p class="muted">批次：<strong>${esc(lot.name)}${lot.special_treatments?.length ? ' · ' + esc(lot.special_treatments.join('/')) : ''}</strong> · 剩余 ${rem} 管（${lot.storage_stage === 'gradient' && unplaced > 0 ? `暂存盒中 ${unplaced} 管` : `已入盒 ${placed.length} 管`}）</p>
+    ${groupRemaining <= 2 && groupRemaining > 0 ? `<p class="cryo-alert-box is-low-stock">同类库存剩余 ${groupRemaining} 管</p>` : ''}
+    ${mode === 'discard' && placed.length ? '<p class="muted" style="margin:4px 0 8px">提示：若仅因填错或误复制想清空该格，请取消并点击格位详情中的<strong>「删除此格记录」</strong>，不会触发任何污染标记。</p>' : ''}
     <div class="two">
       <label>${label}时间（北京时间）<input name="at" type="datetime-local" required value="${esc(localMinute())}" max="${esc(localMinute())}"></label>
       <label>${label}管数<input name="vials" type="number" min="1" max="${rem}" step="1" required value="${initVials}"></label>
@@ -1851,7 +2460,10 @@ function openCryoRemovalDialog(lot, preselectedSlots = [], options = {}) {
       return `<label class="inline-check"><input type="checkbox" name="discard_slot" value="${esc(full)}" ${preSet.has(full) ? 'checked' : ''}>${esc(cryoBoxLabel(p.box))} · <strong>${esc(p.slot)}</strong></label>`;
     }).join('')}</div></fieldset>` : ''}
     <label>原因（可选）<input name="reason" maxlength="500" value="${esc(defaultReason)}"></label>
-    <label class="inline-check" ${mode !== 'discard' ? 'hidden' : ''}><input type="checkbox" name="is_contamination" ${defaultContam ? 'checked' : ''}>同时记录污染标记</label>
+    ${mode === 'discard' ? `<fieldset class="cryo-edit-scope"><legend>弃置性质</legend>
+      <label class="inline-check"><input type="radio" name="discard_mode" value="plain" checked>普通弃置</label>
+      <label class="inline-check"><input type="radio" name="discard_mode" value="contamination">污染弃置，同时登记污染标记</label></fieldset>` : ''}
+    ${mode === 'thaw' ? cryoThawMediumMarkup(mediumHint) : ''}
     <div data-contam-extra ${defaultContam ? '' : 'hidden'}>
       <label>污染类型（可选）<input name="contamination_kind" maxlength="80"></label>
     </div>
@@ -1861,8 +2473,24 @@ function openCryoRemovalDialog(lot, preselectedSlots = [], options = {}) {
   </form>`;
 
   const form = dialog.querySelector('form'), errEl = dialog.querySelector('#cryo-discard-error');
-  const contamBox = form.elements.namedItem('is_contamination'), contamExtra = dialog.querySelector('[data-contam-extra]');
-  contamBox.onchange = () => { contamExtra.hidden = !contamBox.checked; };
+  cryoGuardFormEnter(form);
+  const mediumEditor = form.querySelector('#thaw-medium-editor');
+  if (mediumEditor) {
+    const toggle = form.elements.namedItem('apply_medium');
+    if (toggle) toggle.onchange = () => { mediumEditor.hidden = !toggle.checked; };
+    bindMediumEditor([{medium: mediumHint?.medium}], null, mediumEditor, 'thaw-');
+    for (const box of mediumEditor.querySelectorAll('[data-medium-apply]')) {
+      if (Object.hasOwn(mediumHint?.medium || {}, box.dataset.mediumApply)) {
+        box.checked = true;
+        box.closest('.medium-field').classList.add('enabled');
+      }
+    }
+  }
+  const contamExtra = dialog.querySelector('[data-contam-extra]');
+  const isContamChecked = () => form.querySelector('input[name="discard_mode"]:checked')?.value === 'contamination';
+  form.querySelectorAll('input[name="discard_mode"]').forEach(r => r.onchange = () => {
+    contamExtra.hidden = !isContamChecked();
+  });
   dialog.querySelectorAll('[data-cryo-close]').forEach(b => b.onclick = () => dialog.close());
   form.onsubmit = async e => {
     e.preventDefault();
@@ -1871,6 +2499,8 @@ function openCryoRemovalDialog(lot, preselectedSlots = [], options = {}) {
     const chosenSlots = placed.length ? [...form.querySelectorAll('[name="discard_slot"]:checked')].map(i => {
       const [box_id, slot] = i.value.split('|'); return {box_id, slot};
     }) : undefined;
+    const isContam = isContamChecked();
+    const medium = mediumEditor && !mediumEditor.hidden ? collectMediumPatch(mediumEditor) : {};
     busy = true;
     try {
       const res = await api('/api/command', {
@@ -1878,8 +2508,9 @@ function openCryoRemovalDialog(lot, preselectedSlots = [], options = {}) {
         payload: {
           lot_id: lot.id, at: v('at'), vials: Number(v('vials')), mode,
           ...(chosenSlots !== undefined ? {slots: chosenSlots} : {}),
-          reason: v('reason'), is_contamination: contamBox.checked,
-          contamination_kind: contamBox.checked ? v('contamination_kind') : '',
+          reason: v('reason'), is_contamination: isContam,
+          ...(Object.keys(medium).length ? {medium} : {}),
+          contamination_kind: isContam ? v('contamination_kind') : '',
           notes: v('notes')
         }
       });
@@ -1888,6 +2519,58 @@ function openCryoRemovalDialog(lot, preselectedSlots = [], options = {}) {
       dialog.close();
       render();
       toast(`已登记${label}并更新库存。`);
+    } catch (err) { errEl.textContent = err.message; errEl.hidden = false; }
+    finally { busy = false; if (typeof renderUndoControl === 'function') renderUndoControl(); }
+  };
+  dialog.showModal();
+}
+
+function openCryoClearYellowDialog({lotId = '', withdrawalId = ''} = {}) {
+  const dialog = cryoDialog();
+  if (!dialog) return;
+  let candidates = [];
+  if (withdrawalId) {
+    const w = (state?.frozen_withdrawals || []).find(x => x.id === withdrawalId);
+    if (w && cryoCanClearYellowWithWithdrawal(w.id)) candidates = [w];
+  } else if (lotId) {
+    candidates = cryoCleanThawCandidatesForYellow(lotId);
+  }
+  if (!candidates.length) return toast('未找到可用于验证无污染的同批次复苏记录。', true);
+  const byId = new Map((state?.frozen_batches || []).map(b => [b.id, b]));
+  const firstLot = byId.get(candidates[0].lot_id);
+  dialog.innerHTML = `<form id="cryo-clear-yellow-form" novalidate>
+    <div class="dialog-head"><div><span class="eyebrow">CLEAR YELLOW ALERT</span><h2>同批次复苏无污染 · 解除黄色预警</h2></div><button type="button" class="icon-button" data-cryo-close aria-label="关闭">×</button></div>
+    <p class="muted">确认同批次（${esc(firstLot?.name || '')}）复苏后的细胞未发现污染，将撤销本次黄色污染预警（原始污染记录会保留在历史中并标注「已通过复苏验证解除」）。</p>
+    <label>依据哪条复苏记录确认无污染
+      <select name="withdrawal_id" required>
+        ${candidates.map(w => {
+          const d = w.destination || {};
+          return `<option value="${esc(w.id)}">${esc(w.at)} · ${esc(d.name || '')}${d.well ? ' / ' + esc(d.well) : ''}（${esc(w.id)}）</option>`;
+        }).join('')}
+      </select>
+    </label>
+    <label>确认无污染时间（北京时间）<input name="at" type="datetime-local" required value="${esc(localMinute())}" max="${esc(localMinute())}"></label>
+    <label>观察备注（可选）<textarea name="notes" maxlength="1000" placeholder="填写本次核对依据"></textarea></label>
+    <p role="alert" class="lab-error" id="cryo-clear-yellow-error" hidden></p>
+    <div class="dialog-actions"><button type="button" class="button secondary" data-cryo-close>取消</button><button type="submit" class="button primary">确认无污染并解除黄色预警</button></div>
+  </form>`;
+  dialog.querySelectorAll('[data-cryo-close]').forEach(b => b.onclick = () => dialog.close());
+  const form = dialog.querySelector('form'), errEl = dialog.querySelector('#cryo-clear-yellow-error');
+  cryoGuardFormEnter(form);
+  form.onsubmit = async e => {
+    e.preventDefault();
+    if (busy) return;
+    const v = n => (form.elements.namedItem(n)?.value || '').trim();
+    busy = true;
+    try {
+      const res = await api('/api/command', {
+        action: 'cryo_clear_yellow_by_thaw', revision: state.revision,
+        payload: {withdrawal_id: v('withdrawal_id'), at: v('at'), notes: v('notes')}
+      });
+      state = res.state;
+      dialog.close();
+      render();
+      toast('已确认同批次复苏无污染，黄色污染预警已解除。');
     } catch (err) { errEl.textContent = err.message; errEl.hidden = false; }
     finally { busy = false; if (typeof renderUndoControl === 'function') renderUndoControl(); }
   };
@@ -1920,9 +2603,10 @@ function openCryoBatchEditDialog(lot, slotContext = null) {
       <label>细胞代次<input name="passage" maxlength="60" value="${esc(lot.passage || '')}"></label>
     </div>
     <div class="two">
+      <label>亚克隆 / 克隆号（可选）<input name="subclone" maxlength="60" value="${esc(lot.subclone || '')}" placeholder="如 #1"></label>
       <label>细胞供者来源<input name="donor" maxlength="200" value="${esc(lot.donor || '')}"></label>
-      <label>原代细胞原激活日<input name="day0" type="date" value="${esc(lot.day0 || '')}"></label>
     </div>
+    <label>原代细胞原激活日<input name="day0" type="date" value="${esc(lot.day0 || '')}"></label>
     <div class="two">${cryoSuggestedVesselMarkup(lot.suggested_vessel || '')}</div>
     ${cryoSciCountMarkup(lot.per_vial_count, lot.per_vial)}
     ${singleSlot && slotContext?.entry ? `<label>当前格位 ${esc(singleSlot)} 的单管编号（可选）<input name="slot_vial_label" maxlength="120" value="${esc(slotContext.entry?.vial_label || '')}"></label>` : ''}
@@ -1933,6 +2617,7 @@ function openCryoBatchEditDialog(lot, slotContext = null) {
     <div class="dialog-actions"><button type="button" class="button secondary" data-cryo-close>取消</button><button type="submit" class="button primary">保存修改</button></div>
   </form>`;
   const form = dialog.querySelector('form'), errEl = dialog.querySelector('#cryo-edit-error');
+  cryoGuardFormEnter(form);
   cryoBindSuggestedVessel(form);
   cryoBindTreatmentRows(form);
   cryoBindResistance(form);
@@ -1953,6 +2638,7 @@ function openCryoBatchEditDialog(lot, slotContext = null) {
       lot_id: lot.id, name: v('name'), cell_kind: v('cell_kind'),
       special_treatments: cryoReadTreatmentRows(form),
       resistance_tags: cryoReadResistance(form),
+      subclone: v('subclone'),
       at: v('at'), passage: v('passage'), donor: v('donor'), day0: v('day0'),
       suggested_vessel: cryoReadSuggestedVessel(form), per_vial_count: count,
       ...(!count && !lot.per_vial_count && lot.per_vial ? {per_vial: lot.per_vial} : {}),

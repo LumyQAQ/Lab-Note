@@ -3,6 +3,8 @@
 import argparse
 import csv
 import errno
+import hashlib
+import re
 import html
 import io
 import json
@@ -71,6 +73,14 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
     store = Store(data_dir)
     token = secrets.token_urlsafe(32)
 
+    # ZIP timestamps are deterministic; hash asset bytes so different builds get different URLs.
+    static_root = ROOT / 'static'
+    def version_asset(match):
+        attr, name = match.groups()
+        digest = hashlib.sha256((static_root / name).read_bytes()).hexdigest()[:12]
+        return f'{attr}="/{name}?v={digest}"'
+    index = re.sub(r'(src|href)="/([A-Za-z0-9_.-]+\.(?:js|css))"', version_asset,
+                   (static_root/'index.html').read_text(encoding='utf-8')).encode()
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -105,10 +115,30 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
                     mime='application/manifest+json' if path.endswith('.webmanifest') else 'image/png'
                     return self.send(200,(ROOT/'static'/path[1:]).read_bytes(),mime)
                 if path == '/api/health':
-                    return self.send(200,{'app':'lab-culture-v1','data_dir':str(store.directory),'pid':os.getpid()})
+                    return self.send(200,{'app':'lab-culture-v1','data_dir':str(store.directory),'install_dir':str(ROOT.parent),'pid':os.getpid()})
+                if path == '/api/version':
+                    from update_check import configured_download_url, configured_repo, read_app_version
+                    return self.send(200, {'version': read_app_version(), 'repo': configured_repo(),
+                                           'download_url': configured_download_url()})
+                if path == '/api/update-check':
+                    from update_check import check_for_updates
+                    force = parse_qs(parsed.query).get('force', ['0'])[0] in ('1','true','yes')
+                    return self.send(200, check_for_updates(force=force))
+                if path == '/api/storage-stats':
+                    return self.send(200, store.storage_stats())
+                if path == '/api/cryo/box-print':
+                    from cryo_storage import render_box_print_html
+                    query = parse_qs(parsed.query)
+                    box_id = query.get('box_id', [''])[0]
+                    output = render_box_print_html(store.state(), box_id)
+                    return self.send(200, output, 'text/html; charset=utf-8',
+                                     'cryo-box.html' if query.get('download')==['1'] else None)
                 if path == '/api/state':
+                    from update_check import configured_download_url, configured_repo, read_app_version
                     backups = sorted(store.directory.joinpath('backups').glob('*.sqlite3'), reverse=True)
                     self.send(200, {'app':'lab-culture-v1', 'state':store.state(), 'token':token,
+                                    'app_version':read_app_version(), 'github_repo':configured_repo(),
+                                    'download_url':configured_download_url(),
                                     'today':current_time().date().isoformat(), 'types':TYPES, 'layouts':LAYOUTS,
                                     'cell_names':store.cell_names(),
                                     'treatments':store.treatments(),
@@ -185,8 +215,10 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
                         return self.send(404, {'error':'备份不存在'})
                     with closing(sqlite3.connect(backup)) as conn:
                         tables={row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-                        exported = {table:[dict(zip([column[0] for column in cursor.description], row)) for row in cursor]
-                                    for table in ['current_state','events','snapshots','transfers','reversals']
+                        from state_codec import unpack_state_blob
+                        exported = {table:[{col[0]: unpack_state_blob(value) if isinstance(value, bytes) else value
+                                            for col, value in zip(cursor.description, row)} for row in cursor]
+                                    for table in ['current_state','events','snapshots','transfers','reversals','command_requests']
                                     if table in tables
                                     for cursor in [conn.execute(f'SELECT * FROM {table}')]}
                     buffer = io.BytesIO()
@@ -196,9 +228,9 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
                         archive.writestr('original-file.sha256', backup.with_suffix('.sha256').read_text().split()[0]+'  culture.sqlite3\n')
                         archive.writestr('恢复说明.txt', '数据库含完整当前记录、操作历史和每日快照。\n将 culture.sqlite3 放入新的恢复目录；运行 python3 server.py --data-dir /恢复目录 --port 8890 验证。不要覆盖正在使用的数据库。完整步骤见程序 README.md。')
                     self.send(200, buffer.getvalue(), 'application/zip', name.replace('.sqlite3','.zip'))
-                elif path in ['/', '/index.html', '/groups.js', '/well-groups.js', '/well-groups.css', '/assay-groups.js', '/manual-groups.js', '/manual-groups.css', '/app.js', '/style.css', '/selection.js', '/source-picker.js', '/source-picker.css', '/replate.js', '/replate.css', '/quick-medium.js', '/quick-medium.css', '/transfer.js', '/transfer-cards.js', '/occupied-targets.js', '/occupied-targets.css', '/archived-cultures.js', '/archived-cultures.css', '/lineage-links.js', '/relocation.js', '/relocation.css', '/autocomplete.js', '/medium.js', '/medium.css','/count.js','/count.css','/workday.js','/workday.css','/home.js','/home.css','/experiments.js','/experiments.css','/result-paste.js', '/cryo-storage.js', '/cryo-storage.css']:
+                elif path in ['/', '/index.html', '/theme.js', '/theme-dark.css', '/cryo-print.js', '/groups.js', '/well-groups.js', '/well-groups.css', '/assay-groups.js', '/manual-groups.js', '/manual-groups.css', '/app.js', '/style.css', '/selection.js', '/source-picker.js', '/source-picker.css', '/replate.js', '/replate.css', '/quick-medium.js', '/quick-medium.css', '/transfer.js', '/transfer-cards.js', '/occupied-targets.js', '/occupied-targets.css', '/archived-cultures.js', '/archived-cultures.css', '/lineage-links.js', '/relocation.js', '/relocation.css', '/autocomplete.js', '/medium.js', '/medium.css','/count.js','/count.css','/workday.js','/workday.css','/home.js','/home.css','/experiments.js','/experiments.css','/result-paste.js', '/cryo-storage.js', '/cryo-storage.css']:
                     file = ROOT / 'static' / ('index.html' if path == '/' else path[1:])
-                    self.send(200, file.read_bytes(), (mimetypes.guess_type(file)[0] or 'text/plain') + '; charset=utf-8')
+                    self.send(200, index if path in ('/','/index.html') else file.read_bytes(), (mimetypes.guess_type(file)[0] or 'text/plain') + '; charset=utf-8')
                 else:
                     self.send(404, {'error':'页面不存在'})
             except ValueError as error:
@@ -245,6 +277,11 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
                         raise ValueError('快照缺少版本')
                     snap = store.snapshot(expected_revision=data['revision'])
                     self.send(200, snap)
+                elif self.path == '/api/compact':
+                    with store.lock:
+                        backup = store.backup()
+                        result = store.compact_storage(keep_recent=10, vacuum=True)
+                    self.send(200, {**result, 'backup':backup.name, 'last_backup':backup.name})
                 elif self.path == '/api/backup':
                     backup = store.backup()
                     self.send(200, {'filename':backup.name,'url':'/api/backups/'+backup.name})

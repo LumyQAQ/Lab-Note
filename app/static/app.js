@@ -87,6 +87,7 @@ async function submitCommand(body) {
 async function api(path, body) {
   const result = path === '/api/command' ? await submitCommand(body) : await requestJson(path, body);
   if(path==='/api/command'&&boot){
+    if(result.state)boot.state=result.state;
     if(Object.prototype.hasOwnProperty.call(result,'undo'))boot.undo=result.undo;
     if(result.workday)boot.workday=result.workday;
     if(result.medium_recipes)boot.medium_recipes=result.medium_recipes;
@@ -112,7 +113,7 @@ function componentSummary(well,recordDate=frozen?.date||boot.today){
   const parts=well.components||[well];
   return `<div class="component-records">${parts.map(p=>`<div><strong>${esc(p.cell)}</strong> · ${esc(p.kind)}<p class="muted">${esc(p.role||'')} ${p.amount?' · '+esc(p.amount):''}${p.aliquot_id?'<br>混合来源整份：'+esc(p.aliquot_role||'混合样本')+' · '+esc(p.aliquot_amount||'未填写加入量')+'（非单组分量）':''}<br>批次：${esc(p.batch||'—')} · Day ${dayOf(p,recordDate)}<br>${esc(p.anchor)}：${esc(p.day0)}${p.origin?'<br>来源：'+esc(p.origin.pool_id?'整体收集：'+(p.origin.sources||[]).map(s=>(s.name||s.id)+' / '+s.well).join('、'):(p.origin.name||p.origin.id||'来源')+' / '+(p.origin.well||'')):''}</p></div>`).join('')}</div>${well.experiment_started_at?`<p class="muted">实验开始：${esc(well.experiment_started_at.replace('T',' '))}</p>`:''}`;
 }
-function modalOpen(){return $('#cryo-dialog').open||$('#archive-culture-dialog')?.open||$('#create-dialog').open||$('#transfer-dialog').open||$('#transfer-system-dialog').open||$('#transfer-review-dialog').open||$('#occupied-target-dialog').open||$('#lineage-dialog').open||$('#edit-container-dialog').open||$('#manual-group-dialog').open||$('#well-group-dialog')?.open||$('#relocation-dialog').open||$('#activity-dialog').open||$('#quick-medium-dialog').open||$('#journal-dialog').open||$('#undo-dialog').open||$('#lab-record-dialog').open;}
+function modalOpen(){return Boolean(document.querySelector('dialog[open]'));}
 function activeContainers() { return displayContainers().filter(c => c.status === 'active'); }
 function wellList(container) { return Object.values(container.wells).filter(w => (container.status==='archived'||frozen)?!!w.cell:memberActive(w)); }
 function activeState() { return frozen ? frozen.state : state; }
@@ -151,6 +152,7 @@ async function switchView(next) {
     if (view === 'history') snapshots = await api('/api/snapshots');
     if (view === 'events') events = await api('/api/events');
     render();
+    if (next === 'backup' && view === next) loadStorageStats();
   } catch (error) { toast(error.message, true); }
 }
 function render() {
@@ -508,9 +510,138 @@ function renderEvents() {
   $('#refresh-events').onclick=()=>switchView('events');
   bindLineageButtons($('#content'));bindLabRecordLinks($('#content'));
 }
+function formatBytes(value) {
+  const bytes = Number(value) || 0;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+}
+const releaseHome = 'https://lumyqaq.github.io/Lab-Note/';
+const dismissedUpdateKey = 'lab-note-dismissed-update';
+let updateInfo = null, checkingUpdate = false, updateRequest = 0;
+let dismissedUpdate = '';
+try { dismissedUpdate = localStorage.getItem(dismissedUpdateKey) || ''; } catch {}
+let storageStats = null, statsRequest = 0;
+
+function officialReleaseLink(raw) {
+  try {
+    const url = new URL(raw);
+    if (!url.username && !url.password && url.protocol === 'https:' &&
+        ((url.host === 'github.com' && url.pathname.startsWith('/LumyQAQ/Lab-Note/releases')) ||
+         (url.host === 'lumyqaq.github.io' && url.pathname.startsWith('/Lab-Note/')))) return url.href;
+  } catch {}
+  return releaseHome;
+}
+
+function renderUpdateBanner() {
+  const banner = $('#update-banner');
+  const available = updateInfo?.has_update && updateInfo.latest_version && updateInfo.latest_version !== dismissedUpdate;
+  banner.hidden = !available;
+  if (!available) return;
+  const href = officialReleaseLink(updateInfo.download_url || updateInfo.release_url);
+  banner.innerHTML = `<div class="update-banner-main"><strong>发现新版本 v${esc(updateInfo.latest_version)}</strong>
+    <span>（当前 v${esc(updateInfo.current_version)}）${updateInfo.notes ? ' · ' + esc(updateInfo.notes) : ''}</span></div>
+    <div class="actions"><a class="button primary" href="${esc(href)}" target="_blank" rel="noopener">查看更新并下载</a>
+    <button type="button" class="text-button" id="dismiss-update-banner">暂不提示</button></div>`;
+  $('#dismiss-update-banner').onclick = () => {
+    dismissedUpdate = updateInfo.latest_version;
+    try { localStorage.setItem(dismissedUpdateKey, dismissedUpdate); } catch {}
+    banner.hidden = true;
+  };
+}
+
+async function runUpdateCheck(force = false) {
+  if (!force && (checkingUpdate || updateInfo)) return;
+  const request = ++updateRequest;
+  checkingUpdate = true;
+  renderVersionCard();
+  try {
+    const info = await api(force ? '/api/update-check?force=1' : '/api/update-check');
+    if (request !== updateRequest) return;
+    updateInfo = info;
+    if (force && info.has_update && info.latest_version === dismissedUpdate) {
+      dismissedUpdate = '';
+      try { localStorage.removeItem(dismissedUpdateKey); } catch {}
+    }
+  } catch {
+    if (request !== updateRequest) return;
+    updateInfo = {status:'offline'};
+  } finally {
+    if (request === updateRequest) {
+      checkingUpdate = false;
+      renderUpdateBanner();
+      renderVersionCard();
+    }
+  }
+}
+
+function renderVersionCard() {
+  const card = $('#version-card');
+  if (!card || view !== 'backup') return;
+  const current = boot.app_version || updateInfo?.current_version;
+  const latest = updateInfo?.latest_version;
+  let status = '向 GitHub Releases 查询适用于本机的公开版本。';
+  if (updateInfo?.status === 'offline') status = '暂时无法检查更新，可稍后重试。';
+  else if (updateInfo?.has_update) status = `发现新版本 v${latest}。${updateInfo.notes || ''}`;
+  else if (latest) status = `已检查，当前没有可用更新。最新公开版本为 v${latest}。`;
+  const href = officialReleaseLink(updateInfo?.download_url || boot.download_url);
+  card.innerHTML = `<h3>程序版本与更新${current ? ' · v' + esc(current) : ''}</h3>
+    <p class="muted" role="status">${esc(status)}</p><div class="actions">
+    <button id="check-updates-btn" type="button" class="button secondary" ${checkingUpdate ? 'disabled' : ''}>${checkingUpdate ? '正在检查…' : '检查 GitHub 更新'}</button>
+    <a class="button ${updateInfo?.has_update ? 'primary' : 'secondary'}" href="${esc(href)}" target="_blank" rel="noopener">${updateInfo?.has_update ? '下载 v' + esc(latest) : '打开版本下载页'}</a>
+    ${updateInfo?.release_url && updateInfo.release_url !== href ? `<a class="text-button" href="${esc(officialReleaseLink(updateInfo.release_url))}" target="_blank" rel="noopener">GitHub 更新日志</a>` : ''}</div>`;
+  $('#check-updates-btn').onclick = () => runUpdateCheck(true);
+}
+
+function renderStorageUsage() {
+  const element = $('#storage-usage');
+  if (!element || view !== 'backup') return;
+  if (!storageStats) { element.textContent = '正在读取数据库占用…'; return; }
+  const stats = storageStats;
+  element.innerHTML = `当前数据库占用 <strong>${formatBytes(stats.db_bytes)}</strong>。共 ${esc(stats.total_events)} 条操作记录，其中 ${esc(stats.compressed_events)} 条已压缩。共 ${esc(stats.total_snapshots)} 份快照，其中 ${esc(stats.compressed_snapshots)} 份已压缩。`;
+}
+
+async function loadStorageStats() {
+  const request = ++statsRequest;
+  try {
+    const result = await api('/api/storage-stats');
+    if (request !== statsRequest || view !== 'backup') return;
+    storageStats = result;
+    renderStorageUsage();
+  } catch {
+    if (request !== statsRequest || view !== 'backup') return;
+    const element = $('#storage-usage');
+    if (element) element.textContent = '暂时无法读取数据库占用。';
+  }
+}
+
 function renderBackup() {
-  $('#content').innerHTML=`<div class="backup-layout"><div class="section-head"><div><h2>数据与备份</h2><span class="muted">记录保存在本机数据库中。</span></div></div><div class="panel"><span class="eyebrow">LOCAL STORAGE</span><h3>你的实验记录，保存在这里</h3><code>${esc(boot.data_dir)}/culture.sqlite3</code><p class="muted">包含当前培养、每次操作前后的状态和全部历史快照。新建或修改点击保存后立即写入；还没有点击保存的表单内容不在备份中。</p><p class="muted">最近独立备份：${esc(boot.last_backup||'尚无备份')}</p><button id="download-backup" class="button primary">↓ 创建并下载完整备份</button><p class="muted" style="margin-top:15px">下载 ZIP 内含数据库、完整 JSON 和恢复说明。每次保存快照也会在 data/backups 中自动备份并校验完整性。建议定期把 ZIP 另存到外置硬盘。</p></div><div class="panel"><span class="eyebrow">EXPORT & HANDOFF</span><h3>带进你的实验记录</h3><p class="muted">日记导出为可用浏览器打开和打印的 HTML；CSV 可用 Excel 继续整理。导出内容包含容器编号、日期、孔位和关联实验编号。历史版本请从“历史日记”打开后导出。</p><div class="actions"><a href="/api/diary.html" class="button secondary">导出当前日记</a><a href="/api/export.csv" class="button secondary">导出当前 CSV</a></div></div><div class="panel"><span class="eyebrow">DAILY ROUTINE</span><h3>每天 22:00，留下一份当日记录</h3><p class="muted">本地服务运行时，每天北京时间 22:00 自动保存快照与备份。若当天 22:00 后重新启动，会补存当天状态并记录实际保存时间。电脑关机或服务未运行的日期不会补造记录。</p><p class="muted">自动留档不会替你确认实验事实。在“当前培养”核对并保存后，当天会多一份已核对版本。Codex 的每日提醒运行状态在 Codex 自动化中查看。</p></div></div>`;
-  $('#download-backup').onclick=async()=>{if(busy)return;busy=true;try{const result=await api('/api/backup',{});const a=document.createElement('a');a.href=result.url;a.download='';a.click();await load();renderBackup();toast('完整备份已生成，下载已开始');}catch(error){toast(error.message,true);}finally{busy=false;if(typeof renderUndoControl==='function')renderUndoControl();}};
+  $('#content').innerHTML=`<div class="backup-layout"><div class="section-head"><div><h2>数据与备份</h2><span class="muted">记录保存在本机数据库中。</span></div></div><div class="panel"><span class="eyebrow">LOCAL STORAGE</span><h3>你的实验记录，保存在这里</h3><code>${esc(boot.data_dir)}/culture.sqlite3</code><p class="muted">包含当前培养、每次操作前后的状态和全部历史快照。新建或修改点击保存后立即写入；还没有点击保存的表单内容不在备份中。</p><p class="muted" id="storage-usage"></p><p class="muted">最近独立备份：${esc(boot.last_backup||'尚无备份')}</p><div class="actions"><button id="download-backup" class="button primary">↓ 创建并下载完整备份</button><button id="compact-storage" type="button" class="button secondary">无损压缩历史记录</button></div><p class="muted">压缩前会创建并校验完整备份。压缩后仍可还原快照、查询历史和撤销操作。</p><p class="muted" style="margin-top:15px">下载 ZIP 内含数据库、完整 JSON 和恢复说明。每次保存快照也会在 data/backups 中自动备份并校验完整性。建议定期把 ZIP 另存到外置硬盘。</p></div><div class="panel" id="version-card"></div><div class="panel"><span class="eyebrow">EXPORT & HANDOFF</span><h3>带进你的实验记录</h3><p class="muted">日记导出为可用浏览器打开和打印的 HTML；CSV 可用 Excel 继续整理。导出内容包含容器编号、日期、孔位和关联实验编号。历史版本请从“历史日记”打开后导出。</p><div class="actions"><a href="/api/diary.html" class="button secondary">导出当前日记</a><a href="/api/export.csv" class="button secondary">导出当前 CSV</a></div></div><div class="panel"><span class="eyebrow">DAILY ROUTINE</span><h3>每天 22:00，留下一份当日记录</h3><p class="muted">本地服务运行时，每天北京时间 22:00 自动保存快照与备份。若当天 22:00 后重新启动，会补存当天状态并记录实际保存时间。电脑关机或服务未运行的日期不会补造记录。</p><p class="muted">自动留档不会替你确认实验事实。在“当前培养”核对并保存后，当天会多一份已核对版本。</p></div></div>`;
+  renderStorageUsage();
+  renderVersionCard();
+  $('#compact-storage').onclick=async event=>{
+    if (busy) return;
+    const button = event.currentTarget;
+    busy = true;
+    button.disabled = true;
+    button.textContent = '正在备份并压缩…';
+    try {
+      const result = await api('/api/compact', {});
+      ++statsRequest;
+      storageStats = result.stats;
+      boot.last_backup = result.last_backup;
+      if (view === 'backup') renderBackup();
+      toast(`历史压缩完成，数据库由 ${formatBytes(result.before_bytes)} 变为 ${formatBytes(result.after_bytes)}。`);
+    } catch (error) {
+      toast(error.message, true);
+    } finally {
+      busy = false;
+      button.disabled = false;
+      button.textContent = '无损压缩历史记录';
+      renderUndoControl();
+    }
+  };
+  $('#download-backup').onclick=async()=>{if(busy)return;busy=true;try{const result=await api('/api/backup',{});const a=document.createElement('a');a.href=result.url;a.download='';a.click();await load();if(view==='backup'){renderBackup();loadStorageStats();}toast('完整备份已生成，下载已开始');}catch(error){toast(error.message,true);}finally{busy=false;if(typeof renderUndoControl==='function')renderUndoControl();}};
 }
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>switchView(b.dataset.view));
 $('#close-create').onclick=$('#cancel-create').onclick=()=>$('#create-dialog').close();
@@ -526,20 +657,38 @@ $('#create-form').onsubmit=async e=>{
   if(ok){$('#create-dialog').close();view='today';experimentFilter='';currentId=state.containers.at(-1).id;statusFilter='active';search='';selected=new Set(Object.keys(current().wells));render();}
 };
 window.addEventListener('beforeunload',e=>{if(dirty||$('#cryo-dialog').open||$('#manual-group-dialog').open||$('#well-group-dialog')?.open||$('#transfer-dialog').open||$('#transfer-system-dialog').open||$('#transfer-review-dialog').open||$('#occupied-target-dialog').open||$('#relocation-dialog').open||$('#activity-dialog').open||$('#quick-medium-dialog').open||$('#lab-record-dialog').open){e.preventDefault();e.returnValue='';}});
-async function start(){try{await load();render();}catch(error){$('#connection').hidden=false;$('#connection').textContent='未连接到本机工作台。请重新启动实验日记并刷新页面。';}}
+async function start(){try{await load();render();setTimeout(() => runUpdateCheck(false), 1500);}catch(error){$('#connection').hidden=false;$('#connection').textContent='未连接到本机工作台。请重新启动实验日记并刷新页面。';}}
 start();
-setInterval(async()=>{
-  if(dirty||busy||inlineRelocationActive||modalOpen()||frozen)return;
-  const oldRevision=state?.revision,oldDate=boot?.today,oldView=view,oldId=currentId;
-  try{
+function editingOrBusy() {
+  return dirty || busy || modalOpen() || inlineRelocationActive
+    || Boolean(document.activeElement?.closest('form'))
+    || (view === 'cryo' && typeof cryoFormEditing === 'function' && cryoFormEditing());
+}
+let refreshPending = false;
+async function refreshCurrentView() {
+  if (refreshPending || editingOrBusy() || frozen) return;
+  refreshPending = true;
+  const oldBoot=boot, oldRevision=state?.revision, oldDate=boot?.today, oldView=view, oldId=currentId;
+  const stillCurrent = () => !editingOrBusy() && !frozen && boot===oldBoot
+    && state?.revision===oldRevision && view===oldView && currentId===oldId;
+  try {
     const result=await api('/api/state');
+    if (!stillCurrent()) return;
     const nextSnapshots=oldView==='history'?await api('/api/snapshots'):null;
     const nextEvents=oldView==='events'?await api('/api/events'):null;
-    // Recheck after network awaits: the user may have begun editing meanwhile.
-    if(dirty||busy||inlineRelocationActive||modalOpen()||frozen||state?.revision!==oldRevision||view!==oldView||currentId!==oldId)return;
+    if (!stillCurrent()) return;
+    const backupChanged=oldView==='backup' && oldBoot?.last_backup!==result.last_backup;
     applyBoot(result);
     if(nextSnapshots)snapshots=nextSnapshots;
     if(nextEvents)events=nextEvents;
-    if(oldRevision!==state.revision||oldDate!==boot.today||nextSnapshots||nextEvents||oldView==='home'||oldView==='work')render();
-  }catch(error){$('#connection').hidden=false;$('#connection').textContent='与本机工作台的连接已中断。请检查工作台，尚未保存的编辑仍在本页。';}
-},30000);
+    if(oldRevision!==state.revision||oldDate!==boot.today||nextSnapshots||nextEvents||backupChanged||oldView==='home'||oldView==='work')render();
+    if (oldView==='backup' && (backupChanged || oldRevision!==state.revision)) loadStorageStats();
+  } catch (error) {
+    if (!stillCurrent()) return;
+    $('#connection').hidden=false;
+    $('#connection').textContent='与本机工作台的连接已中断。请检查工作台，尚未保存的编辑仍在本页。';
+  } finally {
+    refreshPending = false;
+  }
+}
+setInterval(refreshCurrentView, 30000);

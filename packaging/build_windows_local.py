@@ -8,14 +8,14 @@ import zipfile
 
 ROOT=Path(__file__).resolve().parents[1]
 RUNTIME_SHA256='90905e64a840557d8c1bc4f5b74db3d7ee85e3ffb217611cac1c7813acea4159'
-NAME='Lab-Note-1.4.0-preview.1-Windows-x64.zip'
+NAME='Lab-Note-1.5.0-preview.1-Windows-x64.zip'
 
 
 def build(runtime_path,out):
     data=runtime_path.read_bytes()
     if hashlib.sha256(data).hexdigest()!=RUNTIME_SHA256:
         raise ValueError('官方 Python 3.14.10 x64 嵌入包 SHA-256 不匹配')
-    app_files=[f for f in runpy.run_path(str(ROOT/'scripts/build_release.py'))['FILES'] if f.startswith('app/')]
+    app_files=[f for f in runpy.run_path(str(ROOT/'scripts/build_release.py'))['FILES'] if f.startswith('app/') and f != 'app/mac_update.py']
     extra=['Start-Lab-Note.cmd','Stop-Lab-Note.cmd','Check-Lab-Note.cmd','tests/check_local_windows.py']
     license_text='''Lab Note · Windows x64 本地预览版
 软件作者：LumyQAQ，https://github.com/LumyQAQ
@@ -37,6 +37,7 @@ app/tzdata/Shanghai.tzif 是 IANA TZDB 中的 Asia/Shanghai 区域数据（版�
             info=zipfile.ZipInfo('Lab-Note/'+path.as_posix(),(2026,1,1,0,0,0))
             info.create_system=3;info.external_attr=0o100644<<16
             archive.writestr(info,content,compress_type=zipfile.ZIP_DEFLATED)
+        put('VERSION', b'1.5.0-preview.1\n')
         for f in app_files+extra:put(f,(ROOT/f).read_bytes())
         put('使用说明.txt',(ROOT/'packaging/windows-readme.txt').read_text(encoding='utf-8').replace('\n','\r\n').encode('utf-8-sig'))
         put('第三方许可说明.txt',license_text.encode('utf-8-sig'))
