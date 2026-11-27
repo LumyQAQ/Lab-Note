@@ -53,7 +53,7 @@
             <span>本机存储 · 可配对访问</span>
           </div>
           <h1 lang="en">Lab Note<span aria-hidden="true">.</span></h1>
-          <p class="lead">从一个培养孔，查到它的来源、每天的观察、冻存库位与后续实验。</p>
+          <p class="lead">从培养瓶、培养皿、多孔板到冻存盒，查清每份细胞的来源、每日观察与后续实验。</p>
           <div class="hero-actions">
             <a class="button" id="hero-mac-dl" href="downloads/lab-note-v1.6.0.zip" download>
               <span>macOS 正式版 <small id="hero-mac-ver">v1.6.0</small></span>
@@ -75,33 +75,35 @@
           </p>
         </div>
 
-        <div class="demo" id="plate-demo" aria-label="交互式空白模板预览" data-enter>
+        <div class="demo" id="plate-demo" aria-label="交互式多规格模板预览" data-enter>
           <div class="demo-head">
             <div>
-              <p class="micro" id="demo-micro">孔位预览 · 0 / 24 已填写</p>
-              <h2 id="demo-title">空白培养板</h2>
+              <p class="micro" id="demo-micro">培养容器预览 · 0 / 24 已填写</p>
+              <h2 id="demo-title">24 孔板</h2>
             </div>
-            <div class="demo-switch" role="tablist" aria-label="切换预览模板">
-              <button type="button" role="tab" data-demo-mode="plate" aria-selected="true">24 孔板</button>
-              <button type="button" role="tab" data-demo-mode="cryo" aria-selected="false">5×5 冻存盒</button>
+            <div class="demo-switch" role="tablist" aria-label="切换预览大类">
+              <button type="button" role="tab" data-demo-mode="culture" aria-selected="true">培养容器</button>
+              <button type="button" role="tab" data-demo-mode="cryo" aria-selected="false">冻存库位</button>
             </div>
           </div>
 
-          <div class="plate" id="plate" role="group" aria-label="选择培养孔"></div>
-          <div class="cryo-grid" id="cryo-grid" role="group" aria-label="选择冻存格位" hidden></div>
+          <div class="demo-presets" id="demo-presets" role="group" aria-label="切换常见规格预览"></div>
 
-          <noscript><p>启用 JavaScript 可试选孔位与冻存格位。下方提供工作台截图、版本演进与程序下载。</p></noscript>
+          <div class="demo-stage" id="demo-stage" role="group" aria-label="交互式预览区域"></div>
+
+          <noscript><p>启用 JavaScript 可切换预览 6/24/96 孔板、培养瓶、培养皿及 5×5/9×9/10×10 冻存盒。下方提供工作台截图、版本演进与程序下载。</p></noscript>
 
           <div class="legend" id="demo-legend">
             <span><i></i>空位</span>
             <span><i class="picked"></i>当前选中</span>
           </div>
+          <p class="demo-compat" id="demo-compat">支持 16 种内置容器：6 / 12 / 24 / 48 / 96 孔板（含白底/黑底）、T25 / T75 / T175 培养瓶、35–150mm 培养皿，瓶/皿支持 1–100 个同组管理。</p>
 
           <div class="record" aria-live="polite">
             <div class="coordinate" id="coord">—</div>
             <div>
               <strong id="sample">尚未选位</strong>
-              <p id="summary">点选任意培养孔，可预览空白孔板的坐标定位与记录入口。</p>
+              <p id="summary">上方可自由切换常见规格；点选任意单元即可预览坐标定位与记录入口。</p>
             </div>
           </div>
         </div>
@@ -113,9 +115,9 @@
         <div class="work-head">
           <div>
             <p class="kicker">培养工作台</p>
-            <h2>按孔记录，按天回看。</h2>
+            <h2>按容器记录，按天回看。</h2>
           </div>
-          <p>从首页进入一块培养板或冻存盒，给选中的多个单元统一登记操作；单孔或单管条件分化时，也可拆分独立记录并保留完整谱系。</p>
+          <p>从首页进入培养瓶、培养皿、多孔板或冻存盒，给选中的多个单元统一登记操作；单孔、单瓶或单管条件分化时，也可拆分独立记录并保留完整谱系。</p>
         </div>
         <figure class="workbench-frame">
           <img src="assets/workbench.png" alt="macOS 正式版首次启动的工作台首页，培养容器与实验记录均为空" width="1280" height="800" loading="lazy">

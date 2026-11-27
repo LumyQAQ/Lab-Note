@@ -24,19 +24,48 @@ const INITIAL_VISIBLE = 3;
   };
 })();
 
-/* --- 2. Interactive Blank Plate & Cryo Box Demo --- */
+/* --- 2. Interactive Multi-Format Culture & Cryo Demo --- */
 (function initDemo() {
-  const plate = document.getElementById('plate');
-  const cryoGrid = document.getElementById('cryo-grid');
+  const stage = document.getElementById('demo-stage');
+  const presetsWrap = document.getElementById('demo-presets');
+  const compatEl = document.getElementById('demo-compat');
   const coordEl = document.getElementById('coord');
   const sampleEl = document.getElementById('sample');
   const summaryEl = document.getElementById('summary');
   const microEl = document.getElementById('demo-micro');
   const titleEl = document.getElementById('demo-title');
-  if (!plate || !cryoGrid) return;
+  if (!stage || !presetsWrap) return;
 
-  const plateButtons = new Map();
-  const cryoButtons = new Map();
+  const FLASK_SVG = '<svg viewBox="0 0 36 36" aria-hidden="true"><path d="M14 5h8M15 5v6l-7 13a4 4 0 0 0 3.5 6h13a4 4 0 0 0 3.5-6l-7-13V5"/><path d="M10.5 22h15"/></svg>';
+  const DISH_SVG = '<svg viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="13"/><circle cx="18" cy="18" r="9.5" stroke-dasharray="2.5 2.5"/></svg>';
+
+  const MODES = {
+    culture: {
+      compat: '支持 16 种内置容器：6 / 12 / 24 / 48 / 96 孔板（含白底/黑底）、T25 / T75 / T175 培养瓶、35–150mm 培养皿，瓶/皿支持 1–100 个同组管理。',
+      defaultPreset: 'plate-24',
+      presets: [
+        {id: 'plate-6', label: '6 孔板', kind: 'plate', rows: 2, cols: 3, title: '6 孔板', micro: '培养容器预览 · 0 / 6 已填写', cls: 'spacious'},
+        {id: 'plate-24', label: '24 孔板', kind: 'plate', rows: 4, cols: 6, title: '24 孔板', micro: '培养容器预览 · 0 / 24 已填写', cls: ''},
+        {id: 'plate-96', label: '96 孔板', kind: 'plate', rows: 8, cols: 12, title: '96 孔板（含白/黑底）', micro: '培养容器预览 · 0 / 96 已填写', cls: 'dense'},
+        {id: 'flask-t75', label: 'T75 培养瓶', kind: 'vessel', vesselKind: 'flask', count: 4, unit: '瓶', title: 'T75 培养瓶组（示例 4 瓶）', micro: '同组管理预览 · 0 / 4 已填写'},
+        {id: 'dish-100', label: '100mm 培养皿', kind: 'vessel', vesselKind: 'dish', count: 4, unit: '皿', title: '100mm 培养皿组（示例 4 皿）', micro: '同组管理预览 · 0 / 4 已填写'},
+      ],
+    },
+    cryo: {
+      compat: '支持液氮罐与 -80℃ 冰箱，任意 1×1–12×12 自定义冻存盒尺寸、自定义吊架层级，以及 A1 字母 / 纯数字双坐标编号。',
+      defaultPreset: 'cryo-9x9',
+      presets: [
+        {id: 'cryo-9x9', label: '9×9 (81格)', kind: 'cryo', rows: 9, cols: 9, numbering: 'alpha', title: '9×9 冻存盒（81 格）', micro: '冻存库位预览 · 0 / 81 已占用', cls: 'medium'},
+        {id: 'cryo-5x5', label: '5×5 (25格)', kind: 'cryo', rows: 5, cols: 5, numbering: 'alpha', title: '5×5 冻存盒（25 格）', micro: '冻存库位预览 · 0 / 25 已占用', cls: ''},
+        {id: 'cryo-10x10', label: '10×10 (100格)', kind: 'cryo', rows: 10, cols: 10, numbering: 'alpha', title: '10×10 冻存盒（100 格）', micro: '冻存库位预览 · 0 / 100 已占用', cls: 'dense'},
+        {id: 'cryo-num', label: '数字 1–81', kind: 'cryo', rows: 9, cols: 9, numbering: 'numeric', title: '9×9 冻存盒（数字编号 1–81）', micro: '冻存库位预览 · 0 / 81 已占用', cls: 'medium no-axis'},
+      ],
+    },
+  };
+
+  let currentMode = 'culture';
+  let currentPresetId = MODES.culture.defaultPreset;
+  let activeButtons = new Map();
 
   function addAxis(container, label) {
     const el = document.createElement('span');
@@ -46,77 +75,145 @@ const INITIAL_VISIBLE = 3;
     container.append(el);
   }
 
-  function selectPlate(pos) {
-    for (const [key, btn] of plateButtons) btn.setAttribute('aria-pressed', String(pos === key));
-    coordEl.textContent = pos;
-    sampleEl.textContent = '空白培养孔';
-    summaryEl.textContent = '启动工作台后，可在此登记细胞名称、Day 0、培养基配方、计数并关联实验记录。';
-  }
-
-  function selectCryo(pos) {
-    for (const [key, btn] of cryoButtons) btn.setAttribute('aria-pressed', String(pos === key));
-    coordEl.textContent = pos;
-    sampleEl.textContent = '空白冻存格位';
-    summaryEl.textContent = '启动工作台后，可点选或拖选多个空位批量登记亚克隆、抗性与冻存日期，并打印本盒分布图。';
-  }
-
-  // Build 24-well plate (A1-D6)
-  addAxis(plate, '');
-  for (let c = 1; c <= 6; c++) addAxis(plate, String(c));
-  for (const row of 'ABCD') {
-    addAxis(plate, row);
-    for (let c = 1; c <= 6; c++) {
-      const pos = row + c;
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'well';
-      btn.setAttribute('aria-pressed', 'false');
-      btn.textContent = pos;
-      btn.setAttribute('aria-label', `${pos} · 空白培养孔`);
-      btn.onclick = () => selectPlate(pos);
-      plate.append(btn);
-      plateButtons.set(pos, btn);
+  function resetRecord(preset) {
+    coordEl.textContent = '—';
+    if (preset.kind === 'cryo') {
+      sampleEl.textContent = '尚未选格';
+      summaryEl.textContent = '上方可切换常见冻存盒尺寸与编号方式；点选任意格位即可预览定位与入盒说明。';
+    } else if (preset.kind === 'vessel') {
+      sampleEl.textContent = `尚未选${preset.unit}`;
+      summaryEl.textContent = `支持 1–100 个同类${preset.unit}合并为一组统一操作，单${preset.unit}条件分化时也可独立记录。`;
+    } else {
+      sampleEl.textContent = '尚未选孔';
+      summaryEl.textContent = '上方可自由切换孔板、培养瓶或培养皿；点选任意单元即可预览坐标定位与记录入口。';
     }
   }
 
-  // Build 5x5 LN2 cryo box (A1-E5)
-  addAxis(cryoGrid, '');
-  for (let c = 1; c <= 5; c++) addAxis(cryoGrid, String(c));
-  for (const row of 'ABCDE') {
-    addAxis(cryoGrid, row);
-    for (let c = 1; c <= 5; c++) {
-      const pos = row + c;
+  function selectUnit(preset, pos) {
+    for (const [key, btn] of activeButtons) btn.setAttribute('aria-pressed', String(pos === key));
+    coordEl.textContent = pos;
+    if (preset.kind === 'cryo') {
+      sampleEl.textContent = `${preset.title} · 空白格位`;
+      summaryEl.textContent = '启动工作台后，可点选或拖选多个空位批量登记亚克隆、抗性与冻存日期，并导出 A4 分布图。';
+    } else if (preset.kind === 'vessel') {
+      sampleEl.textContent = `${preset.label} · ${pos}`;
+      summaryEl.textContent = '启动工作台后，可批量勾选整组换液/传代，也可单独为其中某一瓶/皿登记不同处理或计数。';
+    } else {
+      sampleEl.textContent = `${preset.label} · 空白培养孔`;
+      summaryEl.textContent = '启动工作台后，可框选多个孔统一登记细胞名称、Day 0、培养基配方、计数并关联实验记录。';
+    }
+  }
+
+  function renderPreset(preset) {
+    stage.innerHTML = '';
+    activeButtons = new Map();
+    microEl.textContent = preset.micro;
+    titleEl.textContent = preset.title;
+    resetRecord(preset);
+
+    if (preset.kind === 'plate') {
+      const grid = document.createElement('div');
+      grid.className = `plate ${preset.cls || ''}`.trim();
+      grid.style.setProperty('--cols', String(preset.cols));
+      addAxis(grid, '');
+      for (let c = 1; c <= preset.cols; c++) addAxis(grid, String(c));
+      for (let r = 0; r < preset.rows; r++) {
+        const rowChar = String.fromCharCode(65 + r);
+        addAxis(grid, rowChar);
+        for (let c = 1; c <= preset.cols; c++) {
+          const pos = rowChar + c;
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'well';
+          btn.setAttribute('aria-pressed', 'false');
+          btn.textContent = pos;
+          btn.setAttribute('aria-label', `${pos} · 空白培养孔`);
+          btn.onclick = () => selectUnit(preset, pos);
+          grid.append(btn);
+          activeButtons.set(pos, btn);
+        }
+      }
+      stage.append(grid);
+    } else if (preset.kind === 'vessel') {
+      const grid = document.createElement('div');
+      grid.className = 'vessel-grid';
+      const icon = preset.vesselKind === 'flask' ? FLASK_SVG : DISH_SVG;
+      for (let i = 1; i <= preset.count; i++) {
+        const pos = `${preset.unit} ${i}`;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'vessel-unit';
+        btn.setAttribute('aria-pressed', 'false');
+        btn.innerHTML = `${icon}<div><strong>${pos}</strong><span>${preset.label} · 空白</span></div>`;
+        btn.setAttribute('aria-label', `${preset.label} ${pos}`);
+        btn.onclick = () => selectUnit(preset, pos);
+        grid.append(btn);
+        activeButtons.set(pos, btn);
+      }
+      stage.append(grid);
+    } else if (preset.kind === 'cryo') {
+      const grid = document.createElement('div');
+      grid.className = `cryo-grid ${preset.cls || ''}`.trim();
+      grid.style.setProperty('--cols', String(preset.cols));
+      const numeric = preset.numbering === 'numeric';
+      if (!numeric) {
+        addAxis(grid, '');
+        for (let c = 1; c <= preset.cols; c++) addAxis(grid, String(c));
+      }
+      let idx = 1;
+      for (let r = 0; r < preset.rows; r++) {
+        const rowChar = String.fromCharCode(65 + r);
+        if (!numeric) addAxis(grid, rowChar);
+        for (let c = 1; c <= preset.cols; c++) {
+          const pos = numeric ? String(idx++) : (rowChar + c);
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'cryo-slot';
+          btn.setAttribute('aria-pressed', 'false');
+          btn.innerHTML = `<b>${pos}</b><span>空</span>`;
+          btn.setAttribute('aria-label', `${pos} · 空白冻存格位`);
+          btn.onclick = () => selectUnit(preset, pos);
+          grid.append(btn);
+          activeButtons.set(pos, btn);
+        }
+      }
+      stage.append(grid);
+    }
+  }
+
+  function renderMode(mode, presetId) {
+    currentMode = mode;
+    const cfg = MODES[mode] || MODES.culture;
+    currentPresetId = presetId || cfg.defaultPreset;
+    const preset = cfg.presets.find(p => p.id === currentPresetId) || cfg.presets[0];
+    currentPresetId = preset.id;
+
+    tabs.forEach(t => t.setAttribute('aria-selected', String(t.dataset.demoMode === mode)));
+    if (compatEl) compatEl.textContent = cfg.compat;
+
+    presetsWrap.innerHTML = '';
+    for (const p of cfg.presets) {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'cryo-slot';
-      btn.setAttribute('aria-pressed', 'false');
-      btn.innerHTML = `<b>${pos}</b><span>空</span>`;
-      btn.setAttribute('aria-label', `${pos} · 空白冻存格位`);
-      btn.onclick = () => selectCryo(pos);
-      cryoGrid.append(btn);
-      cryoButtons.set(pos, btn);
+      btn.className = 'demo-preset';
+      btn.dataset.demoPreset = p.id;
+      btn.setAttribute('aria-pressed', String(p.id === currentPresetId));
+      btn.textContent = p.label;
+      btn.onclick = () => {
+        currentPresetId = p.id;
+        presetsWrap.querySelectorAll('.demo-preset').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.demoPreset === p.id)));
+        renderPreset(p);
+      };
+      presetsWrap.append(btn);
     }
+    renderPreset(preset);
   }
 
   const tabs = document.querySelectorAll('[data-demo-mode]');
   tabs.forEach(tab => {
-    tab.onclick = () => {
-      const mode = tab.dataset.demoMode;
-      tabs.forEach(t => t.setAttribute('aria-selected', String(t.dataset.demoMode === mode)));
-      const isCryo = mode === 'cryo';
-      plate.hidden = isCryo;
-      cryoGrid.hidden = !isCryo;
-      microEl.textContent = isCryo ? '液氮盒预览 · 0 / 25 已占用' : '孔位预览 · 0 / 24 已填写';
-      titleEl.textContent = isCryo ? '空白 5×5 冻存盒' : '空白培养板';
-      coordEl.textContent = '—';
-      sampleEl.textContent = isCryo ? '尚未选格' : '尚未选孔';
-      summaryEl.textContent = isCryo
-        ? '点选任意冻存格位，可预览液氮盒坐标定位与批量入盒说明。'
-        : '点选任意培养孔，可预览空白孔板的坐标定位与记录入口。';
-      for (const btn of plateButtons.values()) btn.setAttribute('aria-pressed', 'false');
-      for (const btn of cryoButtons.values()) btn.setAttribute('aria-pressed', 'false');
-    };
+    tab.onclick = () => renderMode(tab.dataset.demoMode);
   });
+  renderMode('culture', MODES.culture.defaultPreset);
 })();
 
 /* --- 3. Live GitHub Releases Sync & Per-Generation Changelog --- */
