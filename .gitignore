@@ -134,3 +134,4 @@
 !/docs/downloads/lab-note-v1.5.1.zip
 !/docs/downloads/lab-note-v1.5.1.zip.sig
 !/tests/test_dark_mode_browser.cjs
+!/docs/releases.json
