@@ -1,5 +1,26 @@
 [
   {
+    "version": "1.7.0",
+    "date": "2026-11-27",
+    "title": "全样本冻存库、存放时间核查、Word 模板与新孔板模拟",
+    "highlights": [
+      "冻存库支持 -20°C / 4°C 设备及 9 大样本类别。当前位于 -80°C 的细胞会按登记冻存日期和细胞类别显示分层核查提醒，支持按用户填写的患者/供体编号、疾病模型及样本类型关联跳转。",
+      "实验记录新增标准六栏目 Word 模版库（含通用标准、Transwell、类器官三套内置 .docx）及自定义 .docx 上传建档（自动支持栏目结构解析与占位符原版套打），导出 Word 时自动套用默认模版。",
+      "新增 Transwell 6/12/24 孔板与低吸附 U 底 96 孔板，支持 Transwell 双室（上/下室）与类器官液滴/共培养铺板模拟，从模拟孔板一键创建今日实验并自动回填分组表；首页统一极简卡片并融入单行今日核对进度条。",
+      "「数据与备份」页新增自定义本地备份目录（支持原生文件夹选择器与恢复默认）及一键在访达/资源管理器打开当前备份目录。"
+    ],
+    "mac": {
+      "tag": "v1.7.0",
+      "release_url": "https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.7.0",
+      "download_url": "downloads/lab-note-v1.7.0.zip"
+    },
+    "win": {
+      "tag": "v1.7.0-preview.1",
+      "release_url": "https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.7.0-preview.1",
+      "download_url": "https://github.com/LumyQAQ/Lab-Note/releases/download/v1.7.0-preview.1/Lab-Note-1.7.0-preview.1-Windows-x64.zip"
+    }
+  },
+  {
     "version": "1.6.0",
     "date": "2026-11-27",
     "title": "跨设备配对共享、移动端主屏幕与深色孔位",

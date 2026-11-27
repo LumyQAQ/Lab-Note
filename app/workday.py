@@ -8,7 +8,7 @@ from cell_count import normalize_count, count_summary
 from state_codec import loads_state_blob
 from medium import merge_medium, medium_summary, number, text
 from transfer_cultivation import CULTURE_ACTIONS
-from store import TZ, current_time
+from store import TZ, current_time, layout_only_plate
 from group_units import group_quantity, member_active
 from manual_groups import display_containers
 
@@ -307,18 +307,19 @@ def build_workday(conn,state,now,entries=None):
         if c['status']!='active' and not related:continue
         active_members=[w for w in c['wells'].values() if member_active(w)] if c['status']=='active' else []
         rows.append({'id':c['id'],'name':c['name'],'type':c['type'],'status':c['status'],
-                     'checked':c['checked_date']==day,'occupied':len(active_members),
+                     'checked':c['checked_date']==day,'layout_only':layout_only_plate(c),'occupied':len(active_members),
                      'quantity':c['quantity'] if c.get('display_group') else group_quantity(c),'total_members':len(c['wells']),'active_members':len(active_members),
                      'new_today':c['created_at'][:10]==day,'operation_count':sum(e['is_operation'] for e in related),
                      'edit_count':sum(not e['is_operation'] and e['action'] not in ['check','confirm','undo'] for e in related),
                      'last_activity':related[0]['occurred_at'] if related else None,
                      'active_treatment_count':sum(len(w.get('active_treatments',[])) for w in active_members)})
     active=[c for c in rows if c['status']=='active']
+    reviewable=[c for c in active if not c['layout_only']]
     snapshot=conn.execute("SELECT id,date,at,verified,state FROM snapshots WHERE date=? ORDER BY at DESC LIMIT 1",(day,)).fetchone()
     if snapshot:
         snapshot=dict(snapshot);snapshot['revision']=loads_state_blob(snapshot.pop('state'))['revision'];snapshot['up_to_date']=snapshot['revision']==state['revision']
     baseline=conn.execute('SELECT id,date,at FROM snapshots WHERE date<? ORDER BY date DESC,at DESC LIMIT 1',(day,)).fetchone()
-    return {'date':day,'revision':state['revision'],'counts':{'active':len(active),'pending':sum(not c['checked'] for c in active),
-            'checked':sum(c['checked'] for c in active),'operations':sum(e['is_operation'] and not e['undone'] for e in entries),
+    return {'date':day,'revision':state['revision'],'counts':{'active':len(active),'pending':sum(not c['checked'] for c in reviewable),
+            'checked':sum(c['checked'] for c in reviewable),'operations':sum(e['is_operation'] and not e['undone'] for e in entries),
             'edits':sum(not e['is_operation'] and not e['undone'] and e['action'] not in ['check','confirm','undo'] for e in entries)},
             'containers':rows,'timeline':deepcopy(entries[:200]),'snapshot':snapshot,'baseline':dict(baseline) if baseline else None}

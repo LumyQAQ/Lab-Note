@@ -70,6 +70,7 @@ function labTableUnits(table) {
 }
 function labTableUnitChoices(table) {
   const r=labEditor?.record;
+  if(['transwell','organoid'].includes(r?.type) && table==='results')return {unit:['%','cells','个','μm','mm','μm²','RLU','a.u.']};
   if(r?.type==='flow' && table==='results')return {unit:['%','MFI','events','a.u.']};
   if(r?.type==='western' && r.variant==='blot' && table==='lanes')return {unit:unitPresets.mass};
   if(r?.type==='elisa' && ['samples','standards'].includes(table))return {unit:unitPresets.concentration};
@@ -398,6 +399,7 @@ function labBindEditor() {
       if(onClose){labEditor.onClose=onClose;labEditor.revision=editor.revision;}
     }else if(onClose)onClose({});
   });
+  if(typeof bindPhaseThreeEditor==='function')bindPhaseThreeEditor(editor);
   if(editor.readonly){form.onsubmit=e=>e.preventDefault();return;}
   bindPasteButtons(editor);
   form.oninput=()=>{dirty=true;};

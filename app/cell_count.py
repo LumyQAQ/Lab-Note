@@ -8,6 +8,20 @@ from medium import number, text
 KEYS={'mode','coefficient','exponent','unit','volume_value','volume_unit','measured_at'}
 
 
+def cells_per_well(value):
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return ''
+        if len(value) <= 80 and re.fullmatch(r'(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]{1,2})?', value):
+            count = Decimal(value)
+            if not count:
+                return '0'
+            if count == count.to_integral_value() and count.adjusted() < 80:
+                return str(int(count))
+    raise ValueError('每孔加入细胞数须为非负整数，可用科学计数法填写')
+
+
 def normalize_count(value,well,now=None):
     if isinstance(value,dict) and set(value)=={'clear'} and value['clear'] is True:return None
     if not isinstance(value,dict) or set(value)-KEYS:

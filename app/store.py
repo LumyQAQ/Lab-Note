@@ -2,8 +2,10 @@
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import threading
+import tempfile
 import uuid
 from contextlib import contextmanager, closing
 from copy import deepcopy
@@ -12,15 +14,17 @@ from pathlib import Path
 from platform_config import TZ
 from state_codec import loads_state_blob, pack_state_blob
 from medium import merge_medium, recipe_catalogue, recipe_key, saved_media
-from cell_count import normalize_count
-from group_units import DISH_TYPES, GROUP_TYPES, group_keys, group_quantity, member_active, normalize_quantity, resize_members
+from cell_count import normalize_count, cells_per_well
+from group_units import ASSAY_CELL_LABELS, ASSAY_VOLUME_LABELS, assay_kind, documented_assay_identities, DISH_TYPES, GROUP_TYPES, group_keys, group_quantity, member_active, normalize_quantity, resize_members
 from manual_groups import apply_merge, apply_unmerge, begin_projection, commit_projection, get_display_group
 
 RECENT_EVENTS = 10
 
 LAYOUTS = {'6孔板': (2, 3), '12孔板': (3, 4), '24孔板': (4, 6),
            '48孔板': (6, 8), '96孔板': (8, 12),
-           '白底96孔板': (8, 12), '黑底96孔板': (8, 12)}
+           '白底96孔板': (8, 12), '黑底96孔板': (8, 12),
+           '低吸附U底96孔板': (8, 12),
+           'Transwell 6孔板': (2, 3), 'Transwell 12孔板': (3, 4), 'Transwell 24孔板': (4, 6)}
 TYPES = ['T25', 'T75', 'T175', *DISH_TYPES, *LAYOUTS]
 FIELDS = ['cell', 'kind', 'batch', 'day0', 'anchor', 'treatment',
           'concentration', 'treated_at', 'notes', 'experiment']
@@ -62,6 +66,135 @@ def empty_well():
     return {key: '' for key in FIELDS}
 
 
+def layout_only_plate(container):
+    wells = container['wells'].values()
+    return (container['type'] in LAYOUTS and any(assay_kind(w) for w in wells)
+            and not any(member_active(w) for w in wells))
+
+
+def assay_volume(value, label):
+    if not isinstance(value, str):
+        raise ValueError(f'{label}须为正数（µL）')
+    value = value.strip()
+    if not value:
+        return ''
+    if len(value) > 80 or not re.fullmatch(r'(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)', value):
+        raise ValueError(f'{label}须为正数（µL），请填写普通十进制数字')
+    whole, _, fraction = value.partition('.')
+    whole, fraction = whole.lstrip('0') or '0', fraction.rstrip('0')
+    if whole == '0' and not fraction:
+        raise ValueError(f'{label}须大于 0 µL')
+    return whole + ('.' + fraction if fraction else '')
+
+
+def apply_plate_contents(container, payload):
+    if container['status'] != 'active' or container['type'] not in LAYOUTS:
+        raise ValueError('只能编辑在培养的孔板布局')
+    keys, kind = payload.get('wells'), payload.get('kind')
+    if (not isinstance(keys, list) or not keys or
+            any(not isinstance(k, str) or k not in container['wells'] for k in keys) or len(keys) != len(set(keys))):
+        raise ValueError('请选择有效且不重复的孔位')
+    allowed_fields = {
+        'empty': set(),
+        'pbs': {'group', 'final_volume_ul'},
+        'medium': {'group', 'medium', 'final_volume_ul'},
+        'target_medium': {'group', 'medium', 'final_volume_ul', 'target_cell', 'target_volume_ul', 'target_cells_per_well'},
+        'target_effector': {'group', 'medium', 'final_volume_ul', 'target_volume_ul', 'effector_volume_ul', 'target_cell', 'effector_cell', 'target_cells_per_well', 'effector_cells_per_well'},
+        'transwell': {'group', 'transwell_mode', 'pore_size_um', 'matrigel_coating',
+                      'upper_cell', 'upper_cells_per_well', 'upper_medium', 'upper_volume_ul',
+                      'lower_cell', 'lower_cells_per_well', 'lower_medium', 'lower_volume_ul'},
+        'organoid': {'group', 'organoid_name', 'organoid_mode', 'matrix_type', 'dome_volume_ul', 'dome_count',
+                     'medium', 'final_volume_ul', 'effector_cell', 'et_ratio', 'effector_cells_per_well'},
+    }
+    if not isinstance(kind, str) or kind not in allowed_fields:
+        raise ValueError('请选择有效的实验孔内容')
+    fields = (
+        'target_cell', 'effector_cell', 'medium', 'group',
+        'transwell_mode', 'pore_size_um', 'matrigel_coating',
+        'upper_cell', 'upper_medium', 'lower_cell', 'lower_medium',
+        'organoid_name', 'organoid_mode', 'matrix_type', 'dome_count', 'et_ratio',
+    )
+    if set(payload) - {'id', 'wells', 'kind', 'confirm_legacy', *fields, *ASSAY_VOLUME_LABELS, *ASSAY_CELL_LABELS}:
+        raise ValueError('未知的实验孔布局字段')
+    if type(payload.get('confirm_legacy', False)) is not bool:
+        raise ValueError('旧 PBS 占位的更正须明确确认')
+    patch = {}
+    for field in fields:
+        if field not in payload:
+            continue
+        value = payload[field]
+        if not isinstance(value, str) or len(value.strip()) > 300:
+            raise ValueError('孔内细胞、培养基和分组名称须为 300 字以内的文本')
+        patch[field] = value.strip()
+    for field, label in ASSAY_VOLUME_LABELS.items():
+        if field in payload:
+            patch[field] = assay_volume(payload[field], label)
+    for field in ASSAY_CELL_LABELS:
+        if field in payload:
+            patch[field] = cells_per_well(payload[field])
+    has_target = kind in ('target_medium', 'target_effector')
+    allowed = allowed_fields[kind]
+    if any(value for field, value in patch.items() if field not in allowed):
+        raise ValueError('所选孔类型与细胞、悬液体积、培养基或分组不符')
+
+    bound = {key for group in container.get('well_groups', []) for key in group['wells']}
+    changes, converted = {}, []
+    for key in keys:
+        well = container['wells'][key]
+        previous = well.get('assay_contents') or {}
+        linked = previous.get('effector_sources') or previous.get('effector_transfer_id')
+        if previous.get('kind') == kind:
+            contents = previous.copy()
+        else:
+            if linked:
+                raise ValueError(f'{key} 已登记效应细胞流转，不能直接清空或改类，请核对原流转或登记实际丢弃')
+            contents = {'kind':kind, **{field:value for field, value in previous.items() if field in allowed}}
+        for field, value in patch.items():
+            if value:
+                contents[field] = value
+            else:
+                contents.pop(field, None)
+        if contents.get('final_volume_ul') and (contents.get('target_volume_ul') or contents.get('effector_volume_ul')):
+            raise ValueError(f'{key} 请选择记录每孔终体积或分别记录悬液体积')
+        if linked and contents.get('effector_cell') != previous.get('effector_cell'):
+            raise ValueError(f'{key} 的效应细胞已关联来源，请核对流转凭据')
+        cell = well.get('cell', '')
+        if kind == 'pbs' and cell.strip().upper() == 'PBS':
+            if not payload.get('confirm_legacy'):
+                raise ValueError(f'{key} 曾以细胞名登记为 PBS，请确认更正旧占位')
+            if key in bound or any(v for k, v in well.items() if k not in ('cell','kind','day0','anchor')):
+                raise ValueError(f'{key} 还包含培养记录或分组，请先核对后更正')
+            converted.append(key)
+        elif cell and not (kind == 'empty' and previous):
+            if well.get('components'):
+                identities = documented_assay_identities(well, contents.get('target_cell'), contents.get('effector_cell'))
+                if kind != 'target_effector' or not identities:
+                    raise ValueError(f'{key} 已有共培养记录，靶细胞和效应细胞须与其组成一致')
+                contents['target_cell'], contents['effector_cell'] = identities
+            elif not has_target or contents.get('target_cell', cell) != cell:
+                raise ValueError(f'{key} 已登记细胞 {cell}，仅可标注与其匹配的靶细胞')
+            else:
+                contents['target_cell'] = cell
+        elif not cell and any(v for k, v in well.items() if k != 'assay_contents'):
+            raise ValueError(f'{key} 含有其他记录，请先核对该孔')
+        if any(contents.get(field, '').casefold() == 'pbs' for field in ('target_cell', 'effector_cell')):
+            raise ValueError('PBS 不能作为细胞名称，请选择“仅 PBS（无细胞）”')
+        if kind == 'target_medium' and not contents.get('target_cell'):
+            raise ValueError(f'{key} 请填写靶细胞名称')
+        if previous != ({} if kind == 'empty' else contents) or key in converted:
+            changes[key] = contents
+    for key, contents in changes.items():
+        well = container['wells'][key]
+        if key in converted:
+            well = container['wells'][key] = empty_well()
+            container['checked_date'] = ''
+        if kind == 'empty':
+            well.pop('assay_contents', None)
+        else:
+            well['assay_contents'] = contents
+    return {'id': container['id'], 'wells': list(changes), 'kind':kind, **patch, 'legacy_wells': converted}
+
+
 def uses_shared_defaults(container):
     return container['type'] in LAYOUTS or group_quantity(container) > 1
 
@@ -85,7 +218,7 @@ def _scope_snapshot(state, container_ids, record_ids):
 
 
 def _diagnose_scoped_conflict(conn, state, action, payload, revision):
-    simple = ('wells', 'clear', 'activity', 'rename', 'status', 'member_status',
+    simple = ('wells', 'clear', 'plate_contents', 'activity', 'rename', 'status', 'member_status',
               'check', 'well_group_save', 'well_group_remove')
     if action not in (*simple, 'transfer', 'finish_sampling', 'relocate'):
         return None
@@ -144,6 +277,7 @@ class Store:
         self.directory = Path(directory).resolve()
         self.directory.mkdir(parents=True, exist_ok=True)
         self.db = self.directory / 'culture.sqlite3'
+        self._backup_config_file = self.directory / 'backup_config.json'
         self.lock = threading.RLock()
         self._recipe_cursor = -1
         self._recipe_last_undo = 0
@@ -182,6 +316,104 @@ class Store:
                          (encode({'revision': 0, 'containers': [], 'created_at': current_time().isoformat()}),))
         os.chmod(self.db, 0o600)
 
+    def default_backup_dir(self):
+        return (self.directory / 'backups').resolve()
+
+    def backup_dir(self):
+        try:
+            data = json.loads(self._backup_config_file.read_text(encoding='utf-8'))
+            raw = data.get('backup_dir') if isinstance(data, dict) else None
+            if isinstance(raw, str) and raw.strip() and len(raw) <= 1000 and not any(ord(c) < 32 for c in raw):
+                candidate = Path(raw.strip()).expanduser()
+                if candidate.is_absolute():
+                    return candidate
+        except (OSError, ValueError, TypeError, RuntimeError):
+            pass
+        return self.default_backup_dir()
+
+    def is_custom_backup_dir(self):
+        return self.backup_dir() != self.default_backup_dir()
+
+    def backup_dir_info(self):
+        active = self.backup_dir()
+        default = self.default_backup_dir()
+        return {'backup_dir': str(active), 'default_backup_dir': str(default),
+                'is_custom_backup_dir': active != default,
+                'backup_dir_exists': active.is_dir(), **self.backup_status()}
+
+    def set_backup_dir(self, path=None):
+        with self.lock:
+            reset = path is None or (isinstance(path, str) and not path.strip())
+            if not reset and not isinstance(path, str):
+                raise ValueError('备份地址须为文件夹路径文本')
+            raw = '' if reset else path.strip()
+            if len(raw) > 1000 or any(ord(ch) < 32 for ch in raw):
+                raise ValueError('备份地址包含无效字符或长度过长')
+            try:
+                candidate = self.default_backup_dir() if reset else Path(raw).expanduser()
+                if not candidate.is_absolute():
+                    raise ValueError('备份地址必须是绝对路径')
+                resolved = candidate.resolve(strict=False)
+                if resolved.exists() and not resolved.is_dir():
+                    raise ValueError('指定的路径是文件而非文件夹，请选择一个目录')
+                resolved.mkdir(parents=True, exist_ok=True)
+                fd, probe = tempfile.mkstemp(prefix='.lab-note-write-test-', dir=resolved)
+                os.close(fd)
+                Path(probe).unlink()
+            except (OSError, RuntimeError) as exc:
+                raise ValueError(f'无法创建或写入该备份目录：{exc}') from exc
+            if resolved == self.default_backup_dir():
+                self._backup_config_file.unlink(missing_ok=True)
+            else:
+                temporary = None
+                try:
+                    fd, filename = tempfile.mkstemp(prefix='.backup-config-', dir=self.directory)
+                    temporary = Path(filename)
+                    with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+                        json.dump({'backup_dir': str(resolved)}, stream, ensure_ascii=False, indent=2)
+                        stream.write('\n')
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    temporary.replace(self._backup_config_file)
+                finally:
+                    if temporary is not None:
+                        temporary.unlink(missing_ok=True)
+            return self.backup_dir_info()
+
+    def resolve_backup_file(self, name):
+        if not isinstance(name, str) or not name or '/' in name or '\\' in name or Path(name).name != name:
+            return None
+        for directory in (self.backup_dir(), self.default_backup_dir()):
+            candidate = directory / name
+            try:
+                if candidate.is_file() and candidate.resolve().parent == directory.resolve():
+                    return candidate
+            except (OSError, ValueError, RuntimeError):
+                continue
+        return None
+
+    def backup_status(self, marker_only=False):
+        active = self.backup_dir()
+        try:
+            paths = sorted(active.glob('*.sqlite3')) if active.is_dir() else []
+        except OSError:
+            paths = []
+        marker = hashlib.blake2s(digest_size=12)
+        marker.update(os.fsencode(str(active)) + b'\x1f')
+        latest = None
+        for path in paths:
+            marker.update(os.fsencode(path.name) + b'\0')
+            try:
+                candidate = (path.stat().st_mtime_ns, path.name)
+            except OSError:
+                continue
+            if latest is None or candidate > latest:
+                latest = candidate
+        status = {'backup_marker': marker.hexdigest()}
+        if not marker_only:
+            status['last_backup'] = latest[1] if latest else None
+        return status
+
     @contextmanager
     def connect(self):
         conn = sqlite3.connect(self.db, timeout=30)
@@ -198,7 +430,16 @@ class Store:
             self.add_plate_defaults(conn, state)
             self.add_well_defaults(conn, state)
             self.add_medium_defaults(conn, state)
+            self.add_biobank_defaults(state)
             return state
+
+    @staticmethod
+    def add_biobank_defaults(state):
+        for batch in state.get('frozen_batches', []):
+            batch.setdefault('sample_category', 'cell')
+            for key in ('specimen_type', 'source_subject', 'disease_model'):
+                batch.setdefault(key, '')
+            batch.setdefault('sample_meta', {})
 
     def add_plate_defaults(self, conn, state):
         # Older records have no editor default. Recover the most recently SAVED
@@ -451,7 +692,7 @@ class Store:
             if state['revision'] != revision:
                 conflict = _diagnose_scoped_conflict(conn, state, action, payload, revision)
                 raise Conflict('另一窗口已更新记录。请刷新后重新操作；本次修改未写入。', conflict)
-            if action not in ['merge_groups', 'unmerge_groups', 'well_group_save', 'well_group_remove'] and not get_display_group(state, payload.get('id')):
+            if action not in ['merge_groups', 'unmerge_groups', 'well_group_save', 'well_group_remove', 'plate_contents', 'plate_experiment_today', 'word_issue', 'word_archive'] and not get_display_group(state, payload.get('id')):
                 self.add_plate_defaults(conn, state)
                 self.add_well_defaults(conn, state)
                 self.add_medium_defaults(conn, state)
@@ -484,6 +725,11 @@ class Store:
             elif action.startswith('cryo_'):
                 from cryo_storage import apply_cryo_command
                 payload = apply_cryo_command(state, action, payload, now)
+            elif action == 'plate_experiment_today':
+                from plate_experiments import apply_plate_experiment
+                payload = apply_plate_experiment(state, payload, now, LAYOUTS)
+                if payload is None:
+                    return state
             elif action == 'create':
                 name = str(payload.get('name', '')).strip()
                 kind = payload.get('type', '')
@@ -519,6 +765,21 @@ class Store:
             elif action == 'finish_sampling':
                 from finish_sampling import apply_finish_sampling
                 payload=apply_finish_sampling(state,payload,now=datetime.fromisoformat(now))
+            elif action in ('word_issue','word_archive'):
+                ed=payload.get('edition')
+                if not isinstance(ed,dict) or not isinstance(ed.get('id'),str) or not re.fullmatch(r'[0-9a-f]{64}',ed['id']):
+                    raise ValueError('请先生成该版本的文档')
+                rec=next((r for r in state.get('lab_records',[]) if r['id']==ed.get('record_id')),None)
+                if not rec or rec['version']!=ed.get('version') or rec['updated_at']!=ed.get('record_updated_at'):raise Conflict('实验版本已改变，请重新打开当前记录')
+                editions=state.setdefault('word_editions',[])
+                saved=next((a for a in editions if a['id']==ed.get('id') and a['record_id']==rec['id'] and a['record_updated_at']==rec['updated_at']),None)
+                if action=='word_issue':
+                    if not saved:
+                        editions.append({**{key:deepcopy(ed[key]) for key in ('id','record_id','version','record_updated_at','filename') if key in ed},'generated_at':now})
+                else:
+                    if not saved or saved.get('archived_at'):raise ValueError('该稿未生成或已经确认归档')
+                    saved['archived_at']=now
+                payload={'record_id':rec['id'],'title':rec['title'],'version':rec['version'],'edition_id':ed['id']}
             elif action == 'lab_record_save':
                 from lab_records import apply_lab_record
                 def source_snapshot(snapshot_id):
@@ -570,15 +831,18 @@ class Store:
                 payload = {**payload, 'transfer_id':record['id']}
             elif action == 'confirm':
                 active = [c for c in state['containers'] if c['status'] == 'active']
-                if not active or any(not any(member_active(w) for w in c['wells'].values()) for c in active):
+                reviewable = [c for c in active if not layout_only_plate(c)]
+                if not active or any(not any(member_active(w) for w in c['wells'].values()) for c in reviewable):
                     raise ValueError('请先为每个在培养容器填写细胞，或将空容器结束培养')
-                for container in active:
+                for container in reviewable:
                     container['checked_date'] = current_time().date().isoformat()
             else:
                 container = next((c for c in state['containers'] if c['id'] == payload.get('id')), None)
                 if not container:
                     raise ValueError('找不到该培养容器')
-                if action in ['wells', 'clear']:
+                if action == 'plate_contents':
+                    payload = apply_plate_contents(container, payload)
+                elif action in ['wells', 'clear']:
                     if container['status'] != 'active' and not (action == 'clear' and container['type'] in GROUP_TYPES):
                         raise ValueError('结束培养的容器为只读；恢复培养后可编辑')
                     keys = payload.get('wells')
@@ -659,7 +923,8 @@ class Store:
                     container['location'] = str(payload.get('location', ''))[:300]
                 else:
                     raise ValueError('未知操作')
-                container['checked_date'] = ''
+                if action != 'plate_contents':
+                    container['checked_date'] = ''
             if review_roots:
                 checked=[]
                 for c in state['containers']:
@@ -667,7 +932,7 @@ class Store:
                         c['checked_date']=datetime.fromisoformat(now).date().isoformat();checked.append(c['id'])
                 payload={**payload,'check_after':review_id,'checked_after':{'container_ids':checked,'date':datetime.fromisoformat(now).date().isoformat()}}
             payload = commit_projection(state, projection, action, payload)
-            if action != 'undo':
+            if action not in ('undo', 'plate_contents', 'plate_experiment_today', 'word_issue', 'word_archive'):
                 from well_groups import reconcile_well_groups
                 reconcile_well_groups(state, now)
             if action in {'wells', 'activity', 'transfer', 'relocate'}:
@@ -723,7 +988,8 @@ class Store:
                 if expected_revision is not None and state['revision'] != expected_revision:
                     raise Conflict('记录已变化，请刷新后再保存快照')
                 active = [c for c in state['containers'] if c['status'] == 'active']
-                verified = bool(active) and all(c['checked_date'] == day and any(member_active(w) for w in c['wells'].values()) for c in active)
+                reviewable = [c for c in active if not layout_only_plate(c)]
+                verified = bool(active) and all(c['checked_date'] == day and any(member_active(w) for w in c['wells'].values()) for c in reviewable)
                 for container in state['containers']:
                     for well in container['wells'].values():
                         well['day'] = day_number(well['day0'], day) if well['cell'] else None
@@ -740,7 +1006,7 @@ class Store:
     def ensure_snapshot_backup(self, snapshot_id):
         with self.connect() as conn:
             receipt = conn.execute('SELECT filename FROM snapshot_backups WHERE snapshot_id=?', (snapshot_id,)).fetchone()
-        if receipt and (self.directory / 'backups' / receipt['filename']).is_file():
+        if receipt and self.resolve_backup_file(receipt['filename']) is not None:
             return
         backup = self.backup()
         with self.connect() as conn:
@@ -875,29 +1141,44 @@ class Store:
                 state = json.loads(conn.execute('SELECT body FROM current_state').fetchone()[0])
             group = get_display_group(state, container_id)
             related_ids = {container_id, *(group['container_ids'] if group else [])}
-        entries=[e for e in entries if (e['is_operation'] or e['action'] in ['check','confirm'])
+        entries=[e for e in entries if (e['is_operation'] or e['action'] in ['check','confirm','word_issue','word_archive'])
                  and (not container_id or related_ids.intersection(e['container_ids'])) and (not day or e['occurred_at'][:10]==day)]
         entries.sort(key=lambda e:(e['occurred_at'],e['event_id']),reverse=True)
         return deepcopy(entries[:200] if day is None else entries)
 
     def backup(self):
-        directory = self.directory / 'backups'
-        directory.mkdir(exist_ok=True)
-        target = directory / f'culture-{current_time():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}.sqlite3'
-        temporary = target.with_suffix('.tmp')
-        with self.lock, self.connect() as source, closing(sqlite3.connect(temporary)) as destination:
-            source.backup(destination)
-            if destination.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
-                raise RuntimeError('备份完整性校验失败')
-        os.chmod(temporary, 0o600)
-        temporary.replace(target)
-        checksum = hashlib.sha256()
-        with target.open('rb') as saved:
-            for block in iter(lambda: saved.read(1024 * 1024), b''):
-                checksum.update(block)
-        digest = checksum.hexdigest()
-        target.with_suffix('.sha256').write_text(f'{digest}  {target.name}\n')
-        return target
+        from word_templates import snapshot_templates
+        with self.lock:
+            directory = self.backup_dir()
+            try:
+                directory.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                raise ValueError(f'无法访问当前备份目录（{directory}）：{exc}') from exc
+            target = directory / f'culture-{current_time():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}.sqlite3'
+            temporary = target.with_suffix('.tmp')
+            templates = target.with_suffix('.templates.zip')
+            template_tmp = target.with_suffix('.templates.tmp')
+            checksum_path = target.with_suffix('.sha256')
+            try:
+                with self.connect() as source, closing(sqlite3.connect(temporary)) as destination:
+                    source.backup(destination)
+                    if destination.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+                        raise RuntimeError('备份完整性校验失败')
+                os.chmod(temporary, 0o600)
+                snapshot_templates(self.directory, template_tmp)
+                os.chmod(template_tmp, 0o600)
+                checksum = hashlib.sha256()
+                with temporary.open('rb') as saved:
+                    for block in iter(lambda: saved.read(1024 * 1024), b''):
+                        checksum.update(block)
+                checksum_path.write_text(f'{checksum.hexdigest()}  {target.name}\n')
+                template_tmp.replace(templates)
+                temporary.replace(target)
+                return target
+            except Exception:
+                for leftover in (temporary, template_tmp, checksum_path, templates):
+                    leftover.unlink(missing_ok=True)
+                raise
 
     def storage_stats(self):
         """Inspect the database on request, without loading historical states."""

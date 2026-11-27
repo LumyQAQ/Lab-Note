@@ -80,6 +80,15 @@ app/static/well-groups.js
 app/static/workday.css
 app/static/workday.js
 app/store.py
+app/word_export.py
+app/word_templates.py
+app/word_format.json
+app/plate_experiments.py
+app/static/word-editions.js
+app/static/plate-today.js
+app/templates/LabNote_标准实验记录模版_V1.0_六栏目.docx
+app/templates/Transwell_初始实验记录模版_V1.0_六栏目.docx
+app/templates/类器官培养与共培养_初始实验记录模版_V1.0_六栏目.docx
 app/state_codec.py
 app/static/theme.js
 app/static/theme-dark.css
@@ -95,7 +104,7 @@ tests/test_public_app.py
 
 
 def main():
-    target = ROOT / 'docs/downloads/lab-note-v1.6.0.zip'
+    target = ROOT / 'docs/downloads/lab-note-v1.7.0.zip'
     target.parent.mkdir(parents=True, exist_ok=True)
     pending = target.with_suffix('.tmp')
     with zipfile.ZipFile(pending, 'w', compression=zipfile.ZIP_DEFLATED) as archive:

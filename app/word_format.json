@@ -1,0 +1,91 @@
+{
+  "id": "six-column-v1",
+  "name": "Lab Note · 六栏目标准版",
+  "confirm_before_export": false,
+  "sections": [
+    {
+      "key": "purpose",
+      "title": "实验目的",
+      "fields": [
+        "objective"
+      ],
+      "tables": []
+    },
+    {
+      "key": "materials",
+      "title": "实验设备及试剂",
+      "fields": [
+        "instrument",
+        "model",
+        "manufacturer",
+        "software",
+        "plate_type",
+        "substrate_name",
+        "substrate_brand",
+        "substrate_catalog",
+        "substrate_lot",
+        "kit",
+        "lot",
+        "reader",
+        "wavelength",
+        "material",
+        "gel",
+        "membrane",
+        "polymerase",
+        "chemistry",
+        "container",
+        "sample_type",
+        "species",
+        "analyte"
+      ],
+      "tables": [
+        "panel",
+        "antibodies",
+        "primers"
+      ]
+    },
+    {
+      "key": "solutions",
+      "title": "溶剂配制",
+      "fields": [
+        "solvent",
+        "buffer",
+        "inhibitors",
+        "stock_concentration",
+        "stock_unit",
+        "substrate_preparation",
+        "solvent_volume",
+        "solvent_volume_unit",
+        "weighed_amount",
+        "weighed_unit",
+        "final_volume",
+        "final_volume_unit",
+        "preparation_notes"
+      ],
+      "tables": []
+    },
+    {
+      "key": "steps",
+      "title": "实验步骤",
+      "fields": [],
+      "tables": [
+        "preprocessing"
+      ]
+    },
+    {
+      "key": "results",
+      "title": "实验数据与结果",
+      "fields": [],
+      "tables": []
+    },
+    {
+      "key": "conclusion",
+      "title": "本轮总结",
+      "fields": [
+        "result_notes",
+        "results_notes"
+      ],
+      "tables": []
+    }
+  ]
+}

@@ -7,10 +7,31 @@ import uuid
 from medium import merge_medium, number, text
 from platform_config import TZ
 
-DEVICE_KINDS = ('ln2', 'minus80', 'custom')
+DEVICE_KINDS = ('ln2', 'minus80', 'minus20', 'fridge4', 'custom')
 NUMBERING_MODES = ('alpha', 'numeric')
 STORAGE_STAGES = ('gradient', 'stored', 'unassigned')
 CONTAMINATION_PROPAGATION_DAYS = 30
+SAMPLE_CATEGORIES = ('cell', 'clinical', 'protein', 'dna', 'rna', 'virus', 'plasmid', 'bacteria', 'other')
+SAMPLE_CATEGORY_LABELS = {
+    'cell': '细胞',
+    'clinical': '临床/组织/血清',
+    'protein': '蛋白样本',
+    'dna': 'DNA',
+    'rna': 'RNA',
+    'virus': '病毒',
+    'plasmid': '质粒',
+    'bacteria': '菌液/甘油菌',
+    'other': '其他样本',
+}
+SAMPLE_META_KEYS = (
+    'concentration', 'purity', 'volume', 'buffer', 'titer',
+    'host_strain', 'vector', 'sequencing', 'freeze_thaw', 'collection_site',
+)
+MINUS80_CAUTION_DAYS_PRIMARY = 90
+MINUS80_WARN_DAYS_PRIMARY = 180
+MINUS80_CAUTION_DAYS_LINE = 180
+MINUS80_WARN_DAYS_LINE = 365
+_PRIMARY_CELL_HINTS = ('原代', 'pbmc', 'γδ', 'αβ', 'car-t', 't细胞', 'nk', '类器官', 'organoid', '干细胞', 'ipsc', 'msc', 'hsc')
 
 
 def ensure_cryo_storage(state):
@@ -83,8 +104,46 @@ def format_per_vial_count(value):
     return f'{value["coefficient"]} × 10^{value["exponent"]} {value.get("unit") or "cells"}'
 
 
+def normalize_sample_category(value, default='cell'):
+    if value is None or value == '':
+        return default
+    if not isinstance(value, str) or value.strip() not in SAMPLE_CATEGORIES:
+        raise ValueError('不支持的样本大类')
+    return value.strip()
+
+
+def normalize_sample_meta(value):
+    if value is None or value == '' or value == {}:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError('样本扩展属性格式无效')
+    extra = set(value) - set(SAMPLE_META_KEYS)
+    if extra:
+        raise ValueError('包含不支持的样本扩展属性字段')
+    out = {}
+    for k in SAMPLE_META_KEYS:
+        if k in value and value[k] is not None:
+            v = text(str(value[k]), f'样本属性({k})', 200)
+            if v:
+                out[k] = v
+    return out
+
+
 def normalize_optional_fields(payload, *, existing=None):
     base = existing or {}
+    sample_category = (normalize_sample_category(payload['sample_category'])
+                       if 'sample_category' in payload
+                       else normalize_sample_category(base.get('sample_category'), 'cell'))
+    specimen_type = (text(payload['specimen_type'], '样本细分类型', 80)
+                     if 'specimen_type' in payload else (base.get('specimen_type') or ''))
+    source_subject = (text(payload['source_subject'], '患者 / 供体 / 动物编号', 120)
+                      if 'source_subject' in payload else (base.get('source_subject') or ''))
+    disease_model = (text(payload['disease_model'], '疾病 / 模型', 120)
+                     if 'disease_model' in payload else (base.get('disease_model') or ''))
+    if 'sample_meta' in payload:
+        sample_meta = normalize_sample_meta(payload['sample_meta'])
+    else:
+        sample_meta = dict(base.get('sample_meta') or {})
     cell_kind = text(payload['cell_kind'], '细胞类型', 80) if 'cell_kind' in payload else (base.get('cell_kind') or '')
     resistance_tags = (normalize_tags(payload['resistance_tags'], '抗性标签', 60)
                        if 'resistance_tags' in payload else list(base.get('resistance_tags') or []))
@@ -107,6 +166,11 @@ def normalize_optional_fields(payload, *, existing=None):
         except ValueError:
             raise ValueError('请填写有效的原始激活日期') from None
     return {
+        'sample_category': sample_category,
+        'specimen_type': specimen_type,
+        'source_subject': source_subject,
+        'disease_model': disease_model,
+        'sample_meta': sample_meta,
         'cell_kind': cell_kind,
         'resistance_tags': resistance_tags,
         'special_treatments': special_treatments,
@@ -264,6 +328,12 @@ def _same_donor_compatible(a, b):
 
 
 def relation_tier(anchor, other):
+    if (anchor.get('sample_category') or 'cell') != (other.get('sample_category') or 'cell'):
+        return None
+    sa = (anchor.get('source_subject') or '').strip().casefold()
+    sb = (other.get('source_subject') or '').strip().casefold()
+    if sa and sb and sa != sb:
+        return None
     if not _norm_cell(anchor) or _norm_cell(anchor) != _norm_cell(other):
         return None
     if not _same_donor_compatible(anchor, other):
@@ -312,12 +382,14 @@ def contamination_risk_map(state):
     result = {b['id']: {'level': 'none', 'hits': 0, 'events': []} for b in batches}
     for w in events:
         src = by_id.get(w.get('lot_id'))
-        if not src:
+        if not src or (src.get('sample_category') or 'cell') != 'cell':
             continue
         src_cell = _norm_cell(src)
         src_at = src.get('at') or ''
         src_p = _parse_passage_num(src)
         for b in batches:
+            if (b.get('sample_category') or 'cell') != 'cell':
+                continue
             is_strong = (b['id'] == src['id']) or (relation_tier(src, b) == 'strong')
             b_p = _parse_passage_num(b)
             passage_ok = (src_p is None or b_p is None or b_p >= src_p)
@@ -348,6 +420,90 @@ def contamination_risk_map(state):
         elif info['hits'] == 1:
             info['level'] = 'yellow'
     return result
+
+
+def _is_primary_like_cell(lot):
+    hay = f'{lot.get("cell_kind") or ""} {lot.get("name") or ""}'.casefold()
+    return any(hint in hay for hint in _PRIMARY_CELL_HINTS)
+
+
+def evaluate_minus80_viability(state, today_iso=None):
+    """Flag review dates for cells currently placed at -80°C; no viability conclusion."""
+    storage = ensure_cryo_storage(state)
+    devices_by_id = {d['id']: d for d in storage['devices']}
+    today_str = (today_iso or datetime.now(TZ).date().isoformat())[:10]
+    today_dt = datetime.fromisoformat(today_str)
+    alerts = {}
+    for lot in state.get('frozen_batches', []):
+        if (lot.get('sample_category') or 'cell') != 'cell':
+            continue
+        if batch_remaining(state, lot) <= 0:
+            continue
+        placed = batch_placed_slots(state, lot['id'])
+        in_minus80 = any(
+            (devices_by_id.get(box.get('device_id')) or {}).get('kind') == 'minus80'
+            for box, _, _ in placed
+        )
+        if not in_minus80:
+            continue
+        at_str = (lot.get('at') or '')[:10]
+        if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', at_str):
+            continue
+        try:
+            days = max(0, (today_dt - datetime.fromisoformat(at_str)).days)
+        except ValueError:
+            continue
+        primary = _is_primary_like_cell(lot)
+        caution_days = MINUS80_CAUTION_DAYS_PRIMARY if primary else MINUS80_CAUTION_DAYS_LINE
+        warn_days = MINUS80_WARN_DAYS_PRIMARY if primary else MINUS80_WARN_DAYS_LINE
+        if days >= warn_days:
+            alerts[lot['id']] = {
+                'level': 'warning',
+                'days': days,
+                'is_primary': primary,
+                'threshold_days': warn_days,
+                'reason': f'当前有格位位于 -80°C，距登记冻存日期 {days} 天，达到应用设置的 {warn_days} 天核查阈值（非活率判定）。请按样本保存方案核查保存条件与复苏活率；日期不代表实际在该设备的存放时长。',
+            }
+        elif days >= caution_days:
+            alerts[lot['id']] = {
+                'level': 'caution',
+                'days': days,
+                'is_primary': primary,
+                'threshold_days': caution_days,
+                'reason': f'当前有格位位于 -80°C，距登记冻存日期 {days} 天，达到应用设置的 {caution_days} 天核查阈值（非活率判定）。请核对样本保存方案；日期不代表实际在该设备的存放时长。',
+            }
+    return alerts
+
+
+def cross_category_related_batches(state, lot_id):
+    """Link samples across categories by patient/donor subject, disease/model, or specimen type."""
+    batches = state.get('frozen_batches', [])
+    anchor = next((b for b in batches if b['id'] == lot_id), None)
+    groups = {'same_subject': [], 'same_model': [], 'same_specimen': []}
+    if not anchor:
+        return groups
+    a_subj = (anchor.get('source_subject') or anchor.get('donor') or '').strip().casefold()
+    a_model = (anchor.get('disease_model') or '').strip().casefold()
+    a_spec = (anchor.get('specimen_type') or '').strip().casefold()
+    a_cat = anchor.get('sample_category') or 'cell'
+    for other in batches:
+        if other['id'] == anchor['id']:
+            continue
+        o_subj = (other.get('source_subject') or other.get('donor') or '').strip().casefold()
+        o_model = (other.get('disease_model') or '').strip().casefold()
+        o_spec = (other.get('specimen_type') or '').strip().casefold()
+        o_cat = other.get('sample_category') or 'cell'
+        rem = batch_remaining(state, other)
+        entry = {'batch': other, 'remaining': rem, 'category': o_cat}
+        if a_subj and o_subj and a_subj == o_subj:
+            groups['same_subject'].append(entry)
+        elif a_model and o_model and a_model == o_model:
+            groups['same_model'].append(entry)
+        elif a_spec and o_spec and a_spec == o_spec and (a_cat != 'cell' or o_cat != 'cell'):
+            groups['same_specimen'].append(entry)
+    for key in groups:
+        groups[key].sort(key=lambda item: (item['remaining'] <= 0, item['category'], item['batch'].get('at', '')), reverse=False)
+    return groups
 
 
 # --- Commands ---
@@ -1227,6 +1383,9 @@ def apply_cryo_template_delete(state, payload, now):
 
 def _stock_group_key(lot):
     return (
+        lot.get('sample_category') or 'cell',
+        (lot.get('source_subject') or '').strip().casefold(),
+        (lot.get('specimen_type') or '').strip().casefold(),
         _norm_cell(lot),
         _norm_treatments(lot),
         tuple(sorted(t.strip().casefold() for t in (lot.get('resistance_tags') or []) if t.strip())),
@@ -1312,22 +1471,35 @@ def render_box_print_html(state, box_id):
             elif risk == 'yellow':
                 cls += ' risk-yellow'
             clone_html = f'<span class="badge clone">{_html.escape(lot["subclone"])}</span>' if lot.get('subclone') else ''
+            cat = lot.get('sample_category') or 'cell'
+            cat_html = f'<span class="badge cat">{_html.escape(SAMPLE_CATEGORY_LABELS.get(cat, cat))}</span>' if cat != 'cell' else ''
             low_n = group_rem.get(lot['id'], 0)
             low_html = f'<span class="badge low">剩{low_n}</span>' if 0 < low_n <= 2 else ''
             risk_html = '<span class="badge red">高危</span>' if risk == 'red' else ('<span class="badge yellow">预警</span>' if risk == 'yellow' else '')
             sub_parts = []
+            if lot.get('specimen_type'):
+                sub_parts.append(lot['specimen_type'])
+            if lot.get('source_subject'):
+                sub_parts.append(lot['source_subject'])
+            if lot.get('disease_model'):
+                sub_parts.append(lot['disease_model'])
             if lot.get('resistance_tags'):
                 sub_parts.append(' '.join(lot['resistance_tags']))
             if lot.get('special_treatments'):
                 sub_parts.append(' / '.join(lot['special_treatments']))
             if lot.get('passage'):
                 sub_parts.append(lot['passage'])
+            meta_d = lot.get('sample_meta') or {}
+            if meta_d.get('concentration'):
+                sub_parts.append(meta_d['concentration'])
+            elif meta_d.get('titer'):
+                sub_parts.append(meta_d['titer'])
             sub_txt = ' · '.join(sub_parts)
             date_txt = (lot.get('at') or '')[:10]
             style = f' style="background:{bg};border-color:{bd}"' if risk == 'none' else ''
             tds.append(
                 f'<td class="{cls}"{style}>'
-                f'<div class="cell-top"><span class="coord">{_html.escape(key)}</span><span class="badges">{clone_html}{low_html}{risk_html}</span></div>'
+                f'<div class="cell-top"><span class="coord">{_html.escape(key)}</span><span class="badges">{cat_html}{clone_html}{low_html}{risk_html}</span></div>'
                 f'<div class="cell-name">{_html.escape(lot["name"])}</div>'
                 + (f'<div class="cell-sub">{_html.escape(sub_txt)}</div>' if sub_txt else '')
                 + (f'<div class="cell-date">{_html.escape(date_txt)}</div>' if date_txt else '')
@@ -1386,6 +1558,7 @@ def render_box_print_html(state, box_id):
         '.badges{display:flex;gap:2px;flex-wrap:wrap;justify-content:flex-end}'
         '.badge{font-size:9px;padding:0 4px;border-radius:999px;font-weight:700;line-height:1.4}'
         '.badge.clone{background:#ece3f8;color:#5b2f91}'
+        '.badge.cat{background:#e2f0f7;color:#1d597a}'
         '.badge.low{background:#fff0d4;color:#995400}'
         '.badge.yellow{background:#f7d57e;color:#6f4200}'
         '.badge.red{background:#e5534b;color:#fff}'

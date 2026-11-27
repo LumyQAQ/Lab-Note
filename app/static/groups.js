@@ -15,6 +15,137 @@ function groupResizeKeys(c,type,quantity){
   return keys;
 }
 function memberActive(w) { return !!w?.cell && w.member_status!=='archived'; }
+const plateContentTypes = {
+  target_medium: {label:'靶细胞＋培养基', short:'靶'},
+  target_effector: {label:'靶细胞＋效应细胞', short:'靶+效'},
+  transwell: {label:'Transwell 双室（上室＋下室）', short:'TW'},
+  organoid: {label:'类器官培养 / 共培养', short:'类器官'},
+  medium: {label:'仅培养基（无细胞）', short:'培养基'},
+  pbs: {label:'仅 PBS（无细胞）', short:'PBS'},
+  empty: {label:'空孔', short:'空'}
+};
+function plateWellLayout(well) {
+  return well?.assay_contents || null;
+}
+function isCytotoxicityPlate(container, source, activeKind='') {
+  if(!boot.layouts[container.type])return false;
+  if(activeKind)return ['cytotoxicity','transwell','organoid/culture','organoid/coculture'].includes(activeKind);
+  if(String(container.type||'').startsWith('Transwell') || container.type==='低吸附U底96孔板')return true;
+  return Object.values(container.wells).some(w=>['target_medium','target_effector','transwell','organoid'].includes(plateWellLayout(w)?.kind)) ||
+    (source?.lab_records||[]).some(r=>['cytotoxicity','transwell','organoid'].includes(r.type) &&
+      r.status!=='cancelled' && r.plate_context?.container_id===container.id);
+}
+function plateWellKind(well) {
+  return plateWellLayout(well)?.kind || (well?.cell ? 'culture' : 'empty');
+}
+function plateWellHasCells(well) {
+  const kind = plateWellKind(well);
+  const layout = plateWellLayout(well);
+  if (kind === 'culture' || kind === 'target_medium' || kind === 'target_effector') return true;
+  if (kind === 'transwell') return !!(layout?.upper_cell || layout?.lower_cell);
+  if (kind === 'organoid') return !!(layout?.organoid_name || layout?.effector_cell);
+  return false;
+}
+function plateComponentRole(part) {
+  const role=String(part.role||'').trim().toLowerCase().replace(/\s+/g,' ');
+  if(['靶','靶细胞','target','target cell','target cells'].includes(role))return 'target_cell';
+  if(['效应','效应细胞','effector','effector cell','effector cells'].includes(role))return 'effector_cell';
+  return '';
+}
+function documentedPlateRoles(well, layout) {
+  const parts=well.components || [], names=[...new Set(parts.map(part=>part.cell))];
+  if(!names.length || names.some(name=>!name) || names.length>2)return null;
+  if(names.length===1) {
+    const roles=new Set(parts.map(plateComponentRole));
+    if(roles.size!==2 || roles.has(''))return null;
+  }
+  const matches=names.map((name,i)=>({target_cell:name,effector_cell:names[names.length-1-i]})).filter(pair=>
+    (!layout.target_cell || layout.target_cell===pair.target_cell) &&
+    (!layout.effector_cell || layout.effector_cell===pair.effector_cell) &&
+    parts.every(part=>!plateComponentRole(part) || pair[plateComponentRole(part)]===part.cell));
+  return matches.length===1?matches[0]:null;
+}
+function plateCanTransferCells(well) {
+  if(!well?.cell)return false;
+  const layout=well.assay_contents;
+  if(!layout)return true;
+  if(layout.kind==='target_medium')return well.cell===layout.target_cell&&!well.components?.length;
+  return layout.kind==='target_effector' && !!layout.target_cell && !!layout.effector_cell && !!documentedPlateRoles(well,layout);
+}
+function plateCellsPerWell(value) {
+  const raw = value.trim();
+  if (!raw) return '';
+  if (raw.length>80 || !/^(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:e[+-]?[0-9]{1,2})?$/i.test(raw)) return null;
+  const [mantissa, exponent='0'] = raw.toLowerCase().split('e');
+  const [whole, fraction=''] = mantissa.split('.');
+  const digits = whole+fraction, point = whole.length+Number(exponent);
+  if (!/[1-9]/.test(digits)) return '0';
+  if (point<1 || /[1-9]/.test(digits.slice(point))) return null;
+  const count = digits.padEnd(point,'0').slice(0,point).replace(/^0+/,'');
+  return count.length<=80 ? count : null;
+}
+function plateWellDescription(well) {
+  const kind = plateWellKind(well), layout = plateWellLayout(well);
+  if(kind === 'culture')return well.cell;
+  if(kind === 'transwell') {
+    return [plateContentTypes.transwell.label, layout?.transwell_mode,
+      layout?.pore_size_um && (layout.pore_size_um + ' μm'),
+      layout?.matrigel_coating && ('包被 ' + layout.matrigel_coating),
+      layout?.upper_cell && ('上室 ' + layout.upper_cell),
+      layout?.upper_cells_per_well && ('上室 ' + layout.upper_cells_per_well + ' 个/孔'),
+      layout?.upper_volume_ul && ('上室 ' + layout.upper_volume_ul + ' µL'),
+      layout?.lower_cell && ('下室 ' + layout.lower_cell),
+      layout?.lower_medium && ('下室条件 ' + layout.lower_medium),
+      layout?.lower_volume_ul && ('下室 ' + layout.lower_volume_ul + ' µL'),
+      layout?.group && ('组名 ' + layout.group)].filter(Boolean).join(' · ');
+  }
+  if(kind === 'organoid') {
+    return [plateContentTypes.organoid.label, layout?.organoid_name && ('类器官 ' + layout.organoid_name),
+      layout?.organoid_mode, layout?.matrix_type && ('基质胶 ' + layout.matrix_type),
+      layout?.dome_volume_ul && ('液滴 ' + layout.dome_volume_ul + ' µL' + (layout.dome_count ? ' × ' + layout.dome_count : '')),
+      layout?.effector_cell && ('效应细胞 ' + layout.effector_cell),
+      layout?.et_ratio && ('E:T ' + layout.et_ratio),
+      layout?.effector_cells_per_well && ('效应 ' + layout.effector_cells_per_well + ' 个/孔'),
+      layout?.final_volume_ul && ('终体积 ' + layout.final_volume_ul + ' µL'),
+      layout?.medium && ('培养基 ' + layout.medium),
+      layout?.group && ('组名 ' + layout.group)].filter(Boolean).join(' · ');
+  }
+  const mixed=kind==='target_effector';
+  const sources=mixed?plateEffectorSourceNames(well):[];
+  return [plateContentTypes[kind]?.label,layout?.target_cell?'靶细胞 '+layout.target_cell:mixed&&'靶细胞待补',
+    mixed&&(layout.effector_cell?'效应细胞 '+layout.effector_cell:'效应细胞待补'),
+    mixed&&(sources.length?'效应细胞来源 '+sources.join('、'):'效应细胞来源待关联'),
+    layout?.target_cells_per_well&&'靶细胞加入数 '+layout.target_cells_per_well+' 个/孔',
+    layout?.effector_cells_per_well&&'效应细胞加入数 '+layout.effector_cells_per_well+' 个/孔',
+    layout?.final_volume_ul&&'每孔终体积 '+layout.final_volume_ul+' µL/孔',
+    layout?.target_volume_ul&&'靶细胞悬液 '+layout.target_volume_ul+' µL/孔',
+    layout?.effector_volume_ul&&'效应细胞悬液 '+layout.effector_volume_ul+' µL/孔',
+    layout?.medium&&'培养基 '+layout.medium,
+    layout?.group&&'组名 '+layout.group].filter(Boolean).join(' · ');
+}
+function plateEffectorSourceNames(well) {
+  const layout=well.assay_contents;
+  const sources=layout.effector_sources || [];
+  const origins=sources.length ? sources : (well.components || [])
+    .filter(part=>part.cell===layout.effector_cell &&
+      (layout.effector_cell!==layout.target_cell || plateComponentRole(part)==='effector_cell'))
+    .flatMap(part=>part.origin?.sources || [part.origin]).filter(source=>source?.id && source.well);
+  return [...new Set(origins.map(source=>(source.name||source.id)+' / '+source.well))];
+}
+function layoutOnlyPlate(container) {
+  const wells = Object.values(container.wells || {});
+  return wells.some(plateWellLayout) && !wells.some(memberActive);
+}
+function plateContentsSummary(container) {
+  const wells = Object.values(container.wells || {});
+  const counts = {culture:0,target_medium:0,target_effector:0,transwell:0,organoid:0,medium:0,pbs:0,empty:0};
+  for(const well of wells)counts[plateWellKind(well)]=(counts[plateWellKind(well)]||0)+1;
+  const parts = [`${counts.culture + counts.target_medium + counts.target_effector} 有细胞`];
+  if (counts.transwell) parts.push(`${counts.transwell} Transwell 双室`);
+  if (counts.organoid) parts.push(`${counts.organoid} 类器官`);
+  parts.push(`${counts.medium} 仅培养基`, `${counts.pbs} 仅 PBS`, `${counts.empty} 空孔`);
+  return parts.join(' · ');
+}
 function groupMemberLabel(c,key) {
   if(c?.display_group){const member=c.display_members[key];if(!member)return key;const siblings=Object.values(c.display_members).filter(m=>m.container_id===member.container_id),index=siblings.findIndex(m=>m.well===member.well);return member.container_name+' · '+member.container_type+(siblings.length>1?' / '+(index+1)+'号'+(dishType(member.container_type)?'皿':'瓶'):'');}
   if(!groupType(c?.type))return key;

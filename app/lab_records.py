@@ -360,6 +360,8 @@ def apply_lab_record(state, payload, snapshot_loader):
               'all_cell_sources': all_sources, 'record_refs': refs,
               'version': prior.get('version', 0) + 1,
               'created_at': prior.get('created_at', now.isoformat()), 'updated_at': now.isoformat()}
+    if prior.get('plate_context'):
+        record['plate_context'] = deepcopy(prior['plate_context'])
     if 'source_groups' in payload or 'source_groups' in prior or all_groups:
         record['source_groups'] = groups
         record['all_source_groups'] = all_groups

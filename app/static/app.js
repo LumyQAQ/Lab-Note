@@ -291,6 +291,7 @@ function renderCultures() {
 const plateContentLabels = new Map([
   ['target_medium', '靶细胞＋培养基'], ['target_effector', '靶细胞＋效应细胞'],
   ['medium', '仅培养基'], ['pbs', '仅 PBS'],
+  ['transwell', 'Transwell 双室'], ['organoid', '类器官培养 / 共培养'],
 ]);
 function plateMarkup(c, readonly) {
   const dims = boot.layouts[c.type];
@@ -313,9 +314,9 @@ function plateMarkup(c, readonly) {
       const hash = [...(w.cell+w.treatment)].reduce((n,ch)=>(n+ch.charCodeAt(0))%4,0);
       const palette = [['#e6eee0','#c9d9bd'],['#e1ebed','#bed3d8'],['#f3ead8','#e1cfa9'],['#ece5ed','#d6c4d8']][hash];
       const content = plateContentLabels.get(w.assay_contents?.kind);
-      const label = content || w.cell || '空';
+      const label = plateContentTypes[w.assay_contents?.kind]?.short || content || w.cell || '空';
       const group = wellGroupFor(c,key);
-      const hoverText = [key, w.cell || content || '空孔', w.cell && content, group && '培养组：'+group.name, w.cell && day != null && 'Day '+day].filter(Boolean).join(' · ');
+      const hoverText = [key, plateWellDescription(w) || '空孔', group && '培养组：'+group.name, w.cell && day != null && 'Day '+day].filter(Boolean).join(' · ');
       const title = [hoverText, w.treatment].filter(Boolean).join('\n');
       markup += `<button class="well ${w.cell?'filled':''} ${selected.has(key)?'selected':''}" style="--well-bg:${palette[0]};--well-border:${palette[1]}" data-well="${key}" ${w.cell?`data-well-palette="${hash}"`:''} ${content?`data-well-content="${esc(w.assay_contents.kind)}"`:''} ${group?`data-well-group-color="${wellGroupColorIndex(group)}"`:''} data-well-hover="${esc(hoverText)}" aria-label="${esc(hoverText)}" aria-pressed="${selected.has(key)}" title="${esc(title)}"><strong>${key}</strong><small>${esc(label)}</small></button>`;
     }
@@ -330,7 +331,7 @@ function renderDetail() {
   if(!readonly&&typeof wellGroupSelection==='function')selected=wellGroupSelection(c,selected);
   const grouped=groupType(c.type)&&groupQuantity(c)>1;
   if(plateInteraction.id!==c.id||readonly)plateInteraction={id:c.id,mode:'select'};
-  $('#detail').innerHTML = `<article class="detail"><div class="detail-head"><div><span class="eyebrow">${esc(c.id)}</span><h2>${esc(c.name)}</h2><p>${esc(c.location||'未填写位置')} · ${esc(groupTypeLabel(c))}${boot.layouts[c.type]?' · '+boot.layouts[c.type].join(' 行 × ')+' 列':''}</p>${!frozen?'<div class="detail-utility-links"><button class="text-button" id="container-journal">操作日志</button></div>':''}</div><div class="detail-actions">${!frozen?`${cultureCheckMarkup(c)}<button class="button primary" id="transfer-container" ${c.status!=='active'||!wellList(c).length?'disabled':''}>传代 / 开展实验</button><button class="button secondary" id="container-activity" ${c.status!=='active'?'disabled':''}>＋ 追加操作</button><details class="detail-more-menu"><summary class="button secondary">更多 ▾</summary><div class="detail-more-list"><button class="text-button" id="container-lineage">流转记录</button><button class="text-button" id="rename-container">${c.display_group?'编辑分组':'编辑信息'}</button>${c.display_group?'<button class="text-button" id="unmerge-container">取消显示合并</button>':''}<button class="text-button" id="archive-container">${c.status==='active'?'结束培养':'恢复培养'}</button></div></details>`:'<span class="pill amber">历史只读</span>'}</div></div>${!readonly?`<div class="culture-quick-actions"><span class="muted">常用操作</span>${typeof quickMediumButtons==='function'?quickMediumButtons(c):''}<button type="button" class="button secondary" id="quick-replate" ${!wellList(c).length?'disabled':''}>传代 / 移孔 / 扩孔</button></div>`:''}<div class="detail-body"><div class="plate-area"><div class="plate-top"><span>${grouped?'选择瓶 / 皿成员':readonly?'查看孔位记录':plateInteraction.mode==='select'?'点击或拖动 · 框选多个孔':'拖动所选孔组 · '+(plateInteraction.mode==='copy'?'复制':'移动')}</span><span>${wellList(c).length} / ${Object.keys(c.wells).length} 已填写</span></div>${wellGroupToolsMarkup(c,readonly)}${boot.layouts[c.type]?'<div class="plate-hover-readout" id="plate-hover-readout" aria-live="polite">悬停或聚焦孔位查看详情</div>':''}${plateMarkup(c,readonly)}<div class="selection-tools"><button id="select-all">${grouped?readonly?'选择全部历史成员':'选择全部在培养 / 待填写成员':'全选'}</button><button id="select-filled">选择已填写</button><button id="deselect">取消选择</button>${grouped&&!frozen?`<button type="button" id="end-group-members" ${![...selected].some(k=>memberActive(c.wells[k]))||readonly?'disabled':''}>结束所选瓶 / 皿</button><button type="button" id="restore-group-members" ${![...selected].some(k=>c.wells[k].cell&&(c.status==='archived'||c.wells[k].member_status==='archived'))?'disabled':''}>恢复所选瓶 / 皿</button>`:''}${!readonly&&boot.layouts[c.type]?`<span class="plate-mode-switch" role="group" aria-label="孔板鼠标操作模式">${[['select','框选'],['copy','孔位复制'],['move','孔位移动']].map(([mode,label])=>`<button type="button" data-plate-mode="${mode}" class="${plateInteraction.mode===mode?'active':''}" aria-pressed="${plateInteraction.mode===mode}">${label}</button>`).join('')}</span><button id="relocate-wells">跨孔板复制 / 移动 ↗</button>`:''}</div>${wellGroupDirectoryMarkup(c,readonly)}<div class="legend"><span><i></i>已填写</span><span><i class="empty"></i>空孔</span><span><i class="selected"></i>选中</span></div><p class="plate-help" id="inline-placement-hint" aria-live="polite">${grouped?'默认选中全组在培养成员，可取消选择后单独选择几瓶。已结束成员保留只读记录，可恢复后继续填写。':readonly?'点击一个或多个孔，查看当时的细胞与处理记录。':'按住鼠标从一个孔拖到另一个孔，可框选整片区域。点击行号或列号可批量选择；勾选的字段才会写入。'}</p></div><aside class="inspector" id="inspector"></aside></div></article>`;
+  $('#detail').innerHTML = `<article class="detail"><div class="detail-head"><div><span class="eyebrow">${esc(c.id)}</span><h2>${esc(c.name)}</h2><p>${esc(c.location||'未填写位置')} · ${esc(groupTypeLabel(c))}${boot.layouts[c.type]?' · '+boot.layouts[c.type].join(' 行 × ')+' 列':''}</p>${!frozen?'<div class="detail-utility-links"><button class="text-button" id="container-journal">操作日志</button></div>':''}</div><div class="detail-actions">${!frozen?`${cultureCheckMarkup(c)}<button class="button primary" id="transfer-container" ${c.status!=='active'||!wellList(c).length?'disabled':''}>传代 / 开展实验</button><button class="button secondary" id="container-activity" ${c.status!=='active'?'disabled':''}>＋ 追加操作</button><details class="detail-more-menu"><summary class="button secondary">更多 ▾</summary><div class="detail-more-list"><button class="text-button" id="container-lineage">流转记录</button><button class="text-button" id="rename-container">${c.display_group?'编辑分组':'编辑信息'}</button>${c.display_group?'<button class="text-button" id="unmerge-container">取消显示合并</button>':''}<button class="text-button" id="archive-container">${c.status==='active'?'结束培养':'恢复培养'}</button></div></details>`:'<span class="pill amber">历史只读</span>'}</div></div>${!readonly?`<div class="culture-quick-actions"><span class="muted">常用操作</span>${typeof quickMediumButtons==='function'?quickMediumButtons(c):''}<button type="button" class="button secondary" id="quick-replate" ${!wellList(c).length?'disabled':''}>传代 / 移孔 / 扩孔</button></div>`:''}<div class="detail-body"><div class="plate-area"><div class="plate-top"><span>${grouped?'选择瓶 / 皿成员':readonly?'查看孔位记录':plateInteraction.mode==='select'?'点击或拖动 · 框选多个孔':'拖动所选孔组 · '+(plateInteraction.mode==='copy'?'复制':'移动')}</span><span>${boot.layouts[c.type]?plateContentsSummary(c):wellList(c).length+' / '+Object.keys(c.wells).length+' 已填写'}</span></div>${wellGroupToolsMarkup(c,readonly)}${boot.layouts[c.type]?'<div class="plate-hover-readout" id="plate-hover-readout" aria-live="polite">悬停或聚焦孔位查看详情</div>':''}${plateMarkup(c,readonly)}<div class="selection-tools"><button id="select-all">${grouped?readonly?'选择全部历史成员':'选择全部在培养 / 待填写成员':'全选'}</button><button id="select-filled">选择已填写</button><button id="deselect">取消选择</button>${grouped&&!frozen?`<button type="button" id="end-group-members" ${![...selected].some(k=>memberActive(c.wells[k]))||readonly?'disabled':''}>结束所选瓶 / 皿</button><button type="button" id="restore-group-members" ${![...selected].some(k=>c.wells[k].cell&&(c.status==='archived'||c.wells[k].member_status==='archived'))?'disabled':''}>恢复所选瓶 / 皿</button>`:''}${!readonly&&boot.layouts[c.type]?`<span class="plate-mode-switch" role="group" aria-label="孔板鼠标操作模式">${[['select','框选'],['copy','孔位复制'],['move','孔位移动']].map(([mode,label])=>`<button type="button" data-plate-mode="${mode}" class="${plateInteraction.mode===mode?'active':''}" aria-pressed="${plateInteraction.mode===mode}">${label}</button>`).join('')}</span><button id="relocate-wells">跨孔板复制 / 移动 ↗</button>`:''}</div>${wellGroupDirectoryMarkup(c,readonly)}<div class="legend"><span><i></i>已填写</span><span><i class="empty"></i>空孔</span><span><i class="selected"></i>选中</span></div><p class="plate-help" id="inline-placement-hint" aria-live="polite">${grouped?'默认选中全组在培养成员，可取消选择后单独选择几瓶。已结束成员保留只读记录，可恢复后继续填写。':readonly?'点击一个或多个孔，查看当时的细胞与处理记录。':'按住鼠标从一个孔拖到另一个孔，可框选整片区域。点击行号或列号可批量选择；勾选的字段才会写入。'}</p></div><aside class="inspector" id="inspector">${!readonly&&boot.layouts[c.type]?window.PlateToday?.markup(c)||'':''}<div id="selected-well-inspector"></div></aside></div></article>`;
   if (!frozen) {
     $('#archive-container').onclick = async () => { if(!canLeave())return;if(!confirm(c.status==='active'?'结束此容器的培养？记录和历史仍会保留。':'恢复此容器？原 Day 0 保留；若已重新复苏或传代，请随后更新起始日期。'))return;await command('status',{id:c.id,status:c.status==='active'?'archived':'active'}); };
     $('#rename-container').onclick = openContainerEditor;
@@ -378,29 +379,285 @@ function renderDetail() {
   document.querySelectorAll('[data-row]').forEach(b => b.onclick = () => selectKeys(Object.keys(c.wells).filter(k=>k.startsWith(b.dataset.row)),true));
   document.querySelectorAll('[data-col]').forEach(b => b.onclick = () => selectKeys(Object.keys(c.wells).filter(k=>k.slice(1)===b.dataset.col),true));
   $('#select-all').onclick = () => {if(!grouped)return selectKeys(Object.keys(c.wells));if(busy||!canLeave())return;dirty=false;selected=new Set(groupDefaultSelection(c));renderDetail();};
-  $('#select-filled').onclick = () => selectKeys(Object.keys(c.wells).filter(k=>readonly?c.wells[k].cell:memberActive(c.wells[k])));
+  $('#select-filled').onclick = () => selectKeys(Object.keys(c.wells).filter(k=>plateWellLayout(c.wells[k]) || (readonly?c.wells[k].cell:memberActive(c.wells[k]))));
   $('#deselect').onclick = () => {if(busy||!canLeave())return;dirty=false;selected.clear();renderDetail();};
   if($('#relocate-wells'))$('#relocate-wells').onclick=openRelocation;
   document.querySelectorAll('[data-plate-mode]').forEach(b=>b.onclick=()=>{if(busy||!canLeave())return;dirty=false;plateInteraction={id:c.id,mode:b.dataset.plateMode};renderDetail();});
   if(typeof bindWellGroupControls==='function')bindWellGroupControls(c,readonly,selectKeys);
   bindCultureChecks($('#detail'));
+  if(!readonly&&boot.layouts[c.type])window.PlateToday?.bind(c);
   renderInspector(c, readonly);
 }
+const plateVolumeFields = [
+  ['final_volume_ul','final-volume','终体积'],
+  ['target_volume_ul','target-volume','靶细胞悬液'],
+  ['effector_volume_ul','effector-volume','效应细胞悬液']
+];
+function plateVolumeMode(layout) {
+  if(layout?.final_volume_ul)return 'final';
+  return layout?.target_volume_ul || layout?.effector_volume_ul ? 'components' : 'none';
+}
+function plateLayoutWithTrackedCells(well, contents) {
+  const layout={...contents};
+  if(!['target_medium','target_effector'].includes(layout.kind))return layout;
+  if(!well.components?.length) {
+    if(!layout.target_cell && well.cell && well.cell.trim().toUpperCase()!=='PBS')layout.target_cell=well.cell;
+  } else if(layout.kind==='target_effector' && (!layout.target_cell || !layout.effector_cell)) {
+    Object.assign(layout,documentedPlateRoles(well,layout));
+  }
+  return layout;
+}
+function plateCompatibleLayout(well,kind) {
+  const old=plateWellLayout(well);
+  if(old?.kind===kind)return {...old};
+  const layout={kind};
+  if(!old || !kind || kind==='empty')return layout;
+  const fields=['group'];
+  if(['pbs','medium','target_medium','target_effector','organoid'].includes(kind))fields.push('final_volume_ul');
+  if(['medium','target_medium','target_effector','organoid'].includes(kind))fields.push('medium');
+  if(['target_medium','target_effector'].includes(kind))fields.push('target_cell','target_volume_ul','target_cells_per_well');
+  if(['target_effector','organoid'].includes(kind))fields.push('effector_cell','effector_cells_per_well');
+  if(kind==='target_effector')fields.push('effector_volume_ul');
+  if(kind==='transwell')fields.push('transwell_mode','pore_size_um','matrigel_coating','upper_cell','upper_cells_per_well','upper_medium','upper_volume_ul','lower_cell','lower_cells_per_well','lower_medium','lower_volume_ul');
+  if(kind==='organoid')fields.push('organoid_name','organoid_mode','matrix_type','dome_volume_ul','dome_count','et_ratio');
+  for(const key of fields)if(old[key])layout[key]=old[key];
+  return layout;
+}
+function plateVolumeDecimal(value) {
+  if(value.length>80 || !/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(value) || !/[1-9]/.test(value))return null;
+  const [whole, digits='']=value.split('.');
+  const fraction=digits.replace(/0+$/,'');
+  return (whole.replace(/^0+/,'')||'0')+(fraction?'.'+fraction:'');
+}
+function plateContentsEditorMarkup(c,wells) {
+  const common = values => values.every(value => value===values[0]) ? values[0] : null;
+  const layouts = wells.map(plateWellLayout);
+  const kind = common(layouts.map(layout => layout?.kind));
+  const values = wells.map((w,i)=>plateLayoutWithTrackedCells(w,{kind:'target_effector',...layouts[i]}));
+  const mode = common(layouts.map(plateVolumeMode)) || 'keep';
+  const savedLayouts = Object.values(c.wells).map(plateWellLayout).filter(Boolean);
+  const cells = savedLayouts.flatMap(layout=>[layout.target_cell,layout.effector_cell,layout.upper_cell,layout.lower_cell,layout.organoid_name]);
+  if(typeof cellNameHistory==='function')cells.push(...cellNameHistory(state,boot.cell_names||[]));
+  const media = savedLayouts.flatMap(layout=>[layout.medium,layout.upper_medium,layout.lower_medium]);
+  if(typeof mediumNameHistory==='function')media.push(...mediumNameHistory('bases'));
+  const suggestions = (id,items)=>`<datalist id="${id}">${[...new Set(items.filter(Boolean))].map(value=>`<option value="${esc(value)}"></option>`).join('')}</datalist>`;
+  const fields = [
+    ['target_cell','target-cell','靶细胞'],
+    ['target_cells_per_well','target-count','每孔实际加入靶细胞数（个，选填）'],
+    ['transwell_mode','tw-mode','Transwell 模式（如 迁移 / 侵袭 / 间接共培养）'],
+    ['pore_size_um','tw-pore','膜孔径 μm（0.4 / 3.0 / 5.0 / 8.0）'],
+    ['matrigel_coating','tw-matrigel','Matrigel 包被条件（选填）'],
+    ['upper_cell','tw-upper-cell','上室（Insert）细胞'],
+    ['upper_cells_per_well','tw-upper-count','上室细胞数（个/孔，选填）'],
+    ['upper_medium','tw-upper-medium','上室培养基'],
+    ['upper_volume_ul','tw-upper-vol','上室体积（µL/孔，选填）'],
+    ['lower_cell','tw-lower-cell','下室（Well）细胞 / 趋化因子'],
+    ['lower_cells_per_well','tw-lower-count','下室细胞数（个/孔，选填）'],
+    ['lower_medium','tw-lower-medium','下室培养基 / 趋化条件'],
+    ['lower_volume_ul','tw-lower-vol','下室体积（µL/孔，选填）'],
+    ['organoid_name','org-name','类器官名称 / 来源 / 代次'],
+    ['organoid_mode','org-mode','类器官模式（单培养 / 胶面共培养 / 胶内混埋 / 悬浮共培养）'],
+    ['matrix_type','org-matrix','基质胶类型与比例'],
+    ['dome_volume_ul','org-dome-vol','每孔基质胶液滴体积（µL/孔，选填）'],
+    ['dome_count','org-dome-count','每孔液滴数（选填，如 1 或 3）'],
+    ['effector_cell','effector-cell','效应细胞（选填）'],
+    ['et_ratio','org-et','效靶比 E:T（选填，如 5:1）'],
+    ['effector_cells_per_well','effector-count','每孔实际加入效应细胞数（个，选填）'],
+    ['medium','medium','培养基名称（选填）'],
+    ['group','group','组名（选填）']
+  ];
+  function fieldMarkup([key,id,label], volume=false) {
+    const value=common(values.map(layout=>layout[key] || ''));
+    const isVol = volume || ['upper_volume_ul','lower_volume_ul','dome_volume_ul'].includes(key);
+    const list=key.includes('medium')?'plate-known-media':key==='group'?'plate-known-groups':(key.includes('cell')||key==='organoid_name')?'plate-known-cells':'';
+    const attrs=key.endsWith('_cells_per_well')?'maxlength="80" inputmode="text"':isVol?'inputmode="decimal" maxlength="80"':`${list?`list="${list}"`:''} maxlength="300"`;
+    return `<label data-plate-input="${key}" hidden>${key==='target_cell'?'<span id="plate-target-label">靶细胞</span>':label}${volume?'（µL/孔）':''}<input id="plate-${id}" data-layout-field="${key}" ${attrs} value="${esc(value||'')}" ${value===null?'placeholder="各孔原值不同，未修改时保留"':''}></label>`;
+  }
+  const options=[['keep','保留各孔原值'],['none','不记录'],['final','每孔终体积'],['components','分别记录两类悬液体积']];
+  return `<form id="plate-contents-form" class="plate-contents-editor" novalidate>
+    <label for="plate-contents-kind">设置孔内组成</label><select id="plate-contents-kind" aria-describedby="plate-contents-help"><option value="">选择孔内组成</option>${Object.entries(plateContentTypes).map(([value,type])=>`<option value="${value}" ${kind===value?'selected':''}>${type.label}</option>`).join('')}</select>
+    <div class="plate-contents-fields">${fields.map(field=>fieldMarkup(field)).join('')}
+      <label id="plate-volume-options" hidden>每孔体积（选填）<select id="plate-volume-mode">${options.map(([value,label])=>`<option value="${value}" ${value===mode?'selected':''}>${label}</option>`).join('')}</select></label>
+      <div class="plate-volume-fields">${plateVolumeFields.map(field=>fieldMarkup(field,true)).join('')}</div>
+    </div>
+    ${suggestions('plate-known-cells',cells.filter(name=>name?.trim().toUpperCase()!=='PBS'))}${suggestions('plate-known-media',media)}${suggestions('plate-known-groups',savedLayouts.map(layout=>layout.group))}
+    <p id="plate-contents-help" aria-live="polite"></p><button type="submit" class="button secondary" id="save-plate-contents">保存到所选 ${wells.length} 个孔</button></form>`;
+}
+function bindPlateContentsEditor(c,keys,wells) {
+  const form=$('#plate-contents-form');
+  if(!form)return;
+  const chooser=$('#plate-contents-kind'), help=$('#plate-contents-help'), save=$('#save-plate-contents');
+  const volumeMode=$('#plate-volume-mode'), fields=form.querySelectorAll('[data-plate-input]');
+  const edited=new Set();
+  let chosenMode=volumeMode.value;
+  let cultureEdited=false;
+  const markCultureEdit=()=>{cultureEdited=true;};
+  const cultureForm=$('#well-form');
+  cultureForm?.addEventListener('input',markCultureEdit);
+  cultureForm?.addEventListener('change',markCultureEdit);
+  $('#inspector').querySelectorAll('#reset-day,#reuse-plate-defaults,#well-form button[type=button]').forEach(button=>button.addEventListener('click',markCultureEdit));
+  const isLegacy = w => String(w.cell || '').trim().toUpperCase()==='PBS';
+  const TW_KEYS = new Set(['transwell_mode','pore_size_um','matrigel_coating','upper_cell','upper_cells_per_well','upper_medium','upper_volume_ul','lower_cell','lower_cells_per_well','lower_medium','lower_volume_ul']);
+  const ORG_KEYS = new Set(['organoid_name','organoid_mode','matrix_type','dome_volume_ul','dome_count','et_ratio']);
+  const SPECIAL_VOL_KEYS = new Set(['upper_volume_ul','lower_volume_ul','dome_volume_ul']);
+  function values() {
+    const kind=chooser.value, patch={kind};
+    const hasVolumes=!!kind && !['empty','transwell'].includes(kind);
+    const savedModes=wells.map(w=>plateVolumeMode(plateCompatibleLayout(w,kind)));
+    const commonMode=savedModes.every(mode=>mode===savedModes[0])?savedModes[0]:'keep';
+    if(!edited.has('mode'))chosenMode=commonMode;
+    const keepOption=volumeMode.querySelector('[value="keep"]');
+    keepOption.hidden=keepOption.disabled=commonMode!=='keep' && chosenMode!=='keep';
+    const legacyTargetVolumes=kind==='target_medium' && wells.some(w=>w.assay_contents?.target_volume_ul);
+    const hasComponents=kind==='target_effector' || legacyTargetVolumes;
+    const componentsOption=volumeMode.querySelector('[value="components"]');
+    componentsOption.hidden=componentsOption.disabled=!hasComponents;
+    componentsOption.textContent=legacyTargetVolumes?'靶细胞悬液体积':'分别记录两类悬液体积';
+    volumeMode.value=chosenMode==='components' && !hasComponents?'none':chosenMode;
+    $('#plate-target-label').textContent=kind==='target_effector'?'靶细胞（选填）':'靶细胞';
+    $('#plate-volume-options').hidden=!hasVolumes;
+    const mode=volumeMode.value;
+    for(const label of fields) {
+      const key=label.dataset.plateInput, input=label.querySelector('input');
+      const isStdVol=key.endsWith('_volume_ul') && !SPECIAL_VOL_KEYS.has(key);
+      const isAnyVol=key.endsWith('_volume_ul');
+      let relevant;
+      if(isStdVol)relevant=hasVolumes && (key==='final_volume_ul'?mode==='final':mode==='components' && (key==='target_volume_ul' || kind==='target_effector'));
+      else if(TW_KEYS.has(key))relevant=kind==='transwell';
+      else if(ORG_KEYS.has(key))relevant=kind==='organoid';
+      else relevant=['target_cell','target_cells_per_well'].includes(key) ? ['target_medium','target_effector'].includes(kind)
+        : ['effector_cell','effector_cells_per_well'].includes(key) ? ['target_effector','organoid'].includes(kind)
+        : key==='medium' ? ['target_medium','target_effector','medium','organoid'].includes(kind)
+        : !!kind && kind!=='empty';
+      label.hidden=!relevant;
+      const value=input.value.trim();
+      if(relevant && edited.has(key)) {
+        patch[key]=key.endsWith('_cells_per_well') ? plateCellsPerWell(value) ?? value : isAnyVol && value ? plateVolumeDecimal(value) ?? value : value;
+      } else if(isStdVol && hasVolumes && edited.has('mode') && mode!=='keep' && !relevant) {
+        patch[key]='';
+      }
+    }
+    return patch;
+  }
+  function preview(w,patch) {
+    const layout=plateCompatibleLayout(w,patch.kind);
+    for(const [key,value] of Object.entries(patch)) {
+      if(value)layout[key]=value;
+      else delete layout[key];
+    }
+    return plateLayoutWithTrackedCells(w,layout);
+  }
+  function problem(patch) {
+    const kind=patch.kind;
+    if(!kind)return '选择组成后可批量保存。';
+    if(kind==='empty' && !wells.some(plateWellLayout))return '所选孔已为空孔。';
+    if(wells.some(w=>{
+      const old=plateWellLayout(w);
+      return old && old.kind!==kind && (old.effector_sources?.length || old.effector_transfer_id);
+    }))return '所选孔已关联效应细胞来源。请撤销原流转，或通过“丢弃”登记实际去向。';
+    for(const w of wells) {
+      const layout=preview(w,patch), {target_cell,effector_cell}=layout;
+      const old=plateWellLayout(w);
+      if(old?.effector_sources?.length || old?.effector_transfer_id) {
+        if(effector_cell!==old.effector_cell)return '效应细胞已关联来源，请核对该孔的流转凭据。';
+      }
+      if(['target_medium','target_effector'].includes(kind)) {
+        if([layout.target_cells_per_well,layout.effector_cells_per_well].some(v=>v && plateCellsPerWell(v)===null))
+          return '每孔加入细胞数须为非负整数，可用科学计数法填写。';
+        if(kind==='target_medium'&&!target_cell)return '请填写靶细胞名称。';
+        if([target_cell,effector_cell].some(name=>name?.toUpperCase()==='PBS'))return 'PBS 请选“仅 PBS（无细胞）”。';
+        if(w.components?.length && !plateCanTransferCells({...w,assay_contents:layout}))return '请核对原共培养记录，明确靶细胞和效应细胞的角色。';
+        if(w.cell && !w.components?.length && w.cell!==target_cell)return '填写的靶细胞须与所选孔已有细胞一致。';
+      } else if(kind==='transwell') {
+        if([layout.upper_cells_per_well,layout.lower_cells_per_well].some(v=>v && plateCellsPerWell(v)===null))
+          return '上下室细胞数须为非负整数，可用科学计数法填写。';
+        if([layout.upper_volume_ul,layout.lower_volume_ul].some(v=>v && !plateVolumeDecimal(v)))
+          return '上下室体积须填写大于 0 的十进制数（µL/孔）。';
+        if(w.cell)return '所选孔含有培养记录，请单独选择可设置的孔。';
+      } else if(kind==='organoid') {
+        if(layout.effector_cells_per_well && plateCellsPerWell(layout.effector_cells_per_well)===null)
+          return '效应细胞数须为非负整数，可用科学计数法填写。';
+        if(layout.dome_volume_ul && !plateVolumeDecimal(layout.dome_volume_ul))
+          return '液滴体积须填写大于 0 的十进制数（µL/孔）。';
+        if(w.cell)return '所选孔含有培养记录，请单独选择可设置的孔。';
+      } else if(w.cell && !(kind==='empty'&&plateWellLayout(w)) && !(kind==='pbs'&&isLegacy(w)))return '所选孔含有培养记录，请单独选择可设置的孔。';
+      if(kind!=='empty' && kind!=='transwell') {
+        if(plateVolumeFields.some(([key])=>layout[key] && !plateVolumeDecimal(layout[key])))return '每孔体积须填写大于 0 的十进制数，单位为 µL/孔。';
+        if(volumeMode.value==='final' && !layout.final_volume_ul)return '请填写每孔终体积，或选择“不记录”。';
+        if(volumeMode.value==='components' && !layout.target_volume_ul && !layout.effector_volume_ul)return '请至少填写一种悬液的每孔体积，或选择“不记录”。';
+      }
+    }
+    return '';
+  }
+  function refresh() {
+    const patch=values(), error=problem(patch);
+    save.disabled=!!error;
+    if(error)help.textContent=error;
+    else if(patch.kind==='empty')help.textContent='移除所选孔的实验组成，已有培养记录将保留。';
+    else if(patch.kind==='transwell')help.textContent='保存后，点击上方「创建今日实验」→ 选择 Transwell 即可自动带入上下室分组表生成初始实验记录。';
+    else if(patch.kind==='organoid')help.textContent='保存后，点击上方「创建今日实验」→ 选择类器官培养/共培养即可自动带入液滴与 E:T 分组表。';
+    else if(patch.kind==='target_effector') {
+      const sources=wells.map(w=>plateEffectorSourceNames({...w,assay_contents:preview(w,patch)}));
+      help.textContent=sources.some(names=>!names.length)?'可先保存孔内组成，具体来源请在实验记录中填写。':
+        wells.length===1?'效应细胞来源 '+sources[0].join('、'):`所选 ${wells.length} 个孔均已关联效应细胞来源。`;
+    }
+    else help.textContent='仅记录实验布局，无需填写 Day 0。';
+  }
+  function changed(event) {
+    if(event.target===volumeMode) {
+      chosenMode=volumeMode.value;
+      edited.add('mode');
+    }
+    if(event.target.dataset.layoutField)edited.add(event.target.dataset.layoutField);
+    if(dirty&&form.dataset.edited!=='true')cultureEdited=true;
+    form.dataset.edited='true';
+    dirty=true;
+    refresh();
+  }
+  form.oninput=form.onchange=changed;
+  form.onsubmit=async event=>{
+    event.preventDefault();
+    if(busy||frozen)return;
+    const contents=values(), error=problem(contents);
+    if(error)return toast(error,true);
+    const legacy=contents.kind==='pbs'&&wells.some(isLegacy);
+    const changedLayouts=wells.filter(w=>{
+      const previous=plateWellLayout(w);
+      if(!previous)return false;
+      const next=preview(w,contents);
+      return contents.kind==='empty'||Object.keys({...previous,...next}).some(key=>previous[key]!==next[key]);
+    }).length;
+    const notices=[];
+    if(legacy)notices.push('将细胞名误填为 PBS 的旧记录更正为无细胞 PBS 孔。');
+    if(changedLayouts)notices.push(`将${contents.kind==='empty'?'清除':'更新'} ${changedLayouts} 个孔的实验组成。已有培养记录将保留。`);
+    if(cultureEdited)notices.push('培养表单中未保存的修改将被放弃。');
+    if(notices.length&&!confirm(notices.join('\n')+'\n确认保存所选 '+keys.length+' 个孔的组成？'))return;
+    if(boot.plate_contents_version!==2)return toast('当前连接尚未加载新版孔内组成，请在新版工作台中保存。',true);
+    await command('plate_contents',{id:c.id,wells:keys,...contents,...(legacy?{confirm_legacy:true}:{})});
+  };
+  refresh();
+}
 function renderInspector(c, readonly) {
-  if (!selected.size) { $('#inspector').innerHTML = '<span class="eyebrow">WELL DETAILS</span><h3 style="margin-top:12px">选择一个培养单元</h3><p class="muted">点击左侧孔位，查看或编辑细胞、培养天数和特殊处理。</p>';return; }
+  if (!selected.size) { $('#selected-well-inspector').innerHTML = '<span class="eyebrow">WELL DETAILS</span><h3 style="margin-top:12px">选择一个培养单元</h3><p class="muted">点击左侧孔位，查看或编辑细胞、培养天数和特殊处理。</p>';return; }
   const keys = [...selected], wells = keys.map(k=>c.wells[k]);
   readonly=readonly||wells.some(w=>w.member_status==='archived');
   const hasComponents=wells.some(w=>w.components);
+  const layoutEditor=!readonly&&!!boot.layouts[c.type]?plateContentsEditorMarkup(c,wells):'';
   const lineage=[...new Map(wells.flatMap(w=>[[w.maintenance_id,w.pool_id?'合并收集 / 扩孔凭据':'移孔换液凭据'],[w.lineage_correction_id,'来源更正凭据'],[w.lineage_id,'原始来源凭据'],[w.placement_id,'孔位修正凭据']]).filter(([id])=>id)).entries()].map(([id,label])=>`<button type="button" class="text-button" data-lineage="${esc(id)}">${label} ↗</button>`).join('');
   const composition=wells.map((w,i)=>w.components?'<h3>'+esc(keys[i])+' · 细胞组成</h3>'+componentSummary(w):'').join('');
-  const title = `<span class="eyebrow">${readonly?'CULTURE RECORD':'BATCH EDIT'}</span><h3 style="margin-top:10px">${readonly?'查看记录':'编辑所选'} <span class="muted">/ ${keys.length}</span></h3><div class="selection-summary">${keys.map(k=>esc(groupMemberLabel(c,k))).join(' · ')}</div>${lineage}${typeof lineageLinksMarkup==='function'?lineageLinksMarkup(c,keys,activeState()):''}${typeof openLineageCorrection==='function'&&!readonly&&wells.every(w=>w.cell)?'<button type="button" class="text-button" id="correct-lineage">补充 / 更正来源关联</button>':''}${wells.map((w,i)=>w.seeding?'<div class="seeding-member"><small>'+esc(groupMemberLabel(c,keys[i]))+'</small>'+seedingDetailsMarkup(w.seeding)+'</div>':'').join('')}${linkedLabRecordsMarkup(c.id,keys)}${composition}${c.status==='active'?activeTreatmentMarkup(wells.map((w,i)=>({...w,key:groupMemberLabel(c,keys[i])})).filter(memberActive)):''}`;
+  const title = `<span class="eyebrow">${readonly?'CULTURE RECORD':'BATCH EDIT'}</span><h3 style="margin-top:10px">${readonly?'查看记录':'编辑所选'} <span class="muted">/ ${keys.length}</span></h3><div class="selection-summary">${keys.map(k=>esc(groupMemberLabel(c,k))).join(' · ')}</div>${layoutEditor}${lineage}${typeof lineageLinksMarkup==='function'?lineageLinksMarkup(c,keys,activeState()):''}${typeof openLineageCorrection==='function'&&!readonly&&wells.every(w=>w.cell)?'<button type="button" class="text-button" id="correct-lineage">补充 / 更正来源关联</button>':''}${wells.map((w,i)=>w.seeding?'<div class="seeding-member"><small>'+esc(groupMemberLabel(c,keys[i]))+'</small>'+seedingDetailsMarkup(w.seeding)+'</div>':'').join('')}${linkedLabRecordsMarkup(c.id,keys)}${composition}${c.status==='active'?activeTreatmentMarkup(wells.map((w,i)=>({...w,key:groupMemberLabel(c,keys[i])})).filter(memberActive)):''}`;
   if (readonly) {
-    $('#inspector').innerHTML = title + (wells.some(w=>w.member_status==='archived')?'<p class="group-readonly-note">所选包含已结束成员，当前仅查看记录。选择在培养成员可编辑；也可恢复所选已结束成员。</p>':'') + wells.map((w,i)=>`<div class="field"><strong>${esc(groupMemberLabel(c,keys[i]))} · ${esc(w.cell||'空孔')}</strong>${w.cell?`<p class="muted">${wellDayLabel(w)} · ${esc(w.kind)}<br>${esc(w.anchor)}：${esc(w.day0)}<br>批次：${esc(w.batch||'—')}<br>处理：${esc(w.treatment||'未填写')}<br>浓度：${esc(w.concentration||'—')}<br>时间：${esc(w.treated_at||'—')}<br>备注：${esc(w.notes||'—')}<br>实验：${esc(w.experiment||'—')}</p>${mediumDetailsMarkup(w.medium)}${countDetailsMarkup(w.cell_count)}`:''}</div>`).join('');bindLineageButtons($('#inspector'));bindLabRecordLinks($('#inspector'));return;
+    $('#selected-well-inspector').innerHTML = title + (wells.some(w=>w.member_status==='archived')?'<p class="group-readonly-note">所选包含已结束成员，当前仅查看记录。选择在培养成员可编辑；也可恢复所选已结束成员。</p>':'') + wells.map((w,i)=>`<div class="field"><strong>${esc(groupMemberLabel(c,keys[i]))} · ${esc(plateWellDescription(w)||'空孔')}</strong>${w.cell?`<p class="muted">${wellDayLabel(w)} · ${esc(w.kind)}<br>${esc(w.anchor)}：${esc(w.day0)}<br>批次：${esc(w.batch||'—')}<br>处理：${esc(w.treatment||'未填写')}<br>浓度：${esc(w.concentration||'—')}<br>时间：${esc(w.treated_at||'—')}<br>备注：${esc(w.notes||'—')}<br>实验：${esc(w.experiment||'—')}</p>${mediumDetailsMarkup(w.medium)}${countDetailsMarkup(w.cell_count)}`:''}</div>`).join('');bindLineageButtons($('#selected-well-inspector'));bindLabRecordLinks($('#selected-well-inspector'));return;
+  }
+  if(wells.some(w=>plateWellLayout(w)&&!w.cell)){
+    $('#selected-well-inspector').innerHTML=title;
+    bindPlateContentsEditor(c,keys,wells);
+    bindLineageButtons($('#selected-well-inspector'));bindLabRecordLinks($('#selected-well-inspector'));return;
   }
   const allEmpty = !c.display_group&&wells.every(w=>!w.cell);
   const sharedDefaults=!c.display_group&&(boot.layouts[c.type]||groupType(c.type))&&!hasComponents?(c.well_defaults||{}):{};
   const treatmentDefault = !c.display_group&&(boot.layouts[c.type]||groupType(c.type)) ? c.default_treated_at || '' : '';
-  $('#inspector').innerHTML = title + `<p class="muted">只应用勾选字段。未勾选的原有内容保持不变。<button type="button" class="text-button" id="reset-day">重新计时</button>${Object.keys(sharedDefaults).length?'<button type="button" class="text-button" id="reuse-plate-defaults">沿用首组信息</button>':''}</p>${allEmpty&&Object.keys(sharedDefaults).length?'<p class="muted">已带入本容器首组的细胞类型、批次及 Day 0，可按需要修改。</p>':''}<form id="well-form" novalidate><div class="fields">${fieldSpecs.map(([key,label,type,hint])=>{
+  $('#selected-well-inspector').innerHTML = title + `<p class="muted">只应用勾选字段。未勾选的原有内容保持不变。<button type="button" class="text-button" id="reset-day">重新计时</button>${Object.keys(sharedDefaults).length?'<button type="button" class="text-button" id="reuse-plate-defaults">沿用首组信息</button>':''}</p>${allEmpty&&Object.keys(sharedDefaults).length?'<p class="muted">已带入本容器首组的细胞类型、批次及 Day 0，可按需要修改。</p>':''}<form id="well-form" novalidate><div class="fields">${fieldSpecs.map(([key,label,type,hint])=>{
     if(hasComponents&&['cell','kind','batch','day0','anchor'].includes(key))return '';
     const values = [...new Set(wells.map(w=>w[key]))], mixed = values.length>1;
     let value = mixed?'':values[0];
@@ -420,7 +677,8 @@ function renderInspector(c, readonly) {
     if(key==='treatment')input=`<div class="cell-autocomplete">${input.replace('aria-label=', 'autocomplete="off" aria-autocomplete="list" aria-expanded="false" aria-controls="treatment-suggestions" aria-label=')}<div id="treatment-suggestions" class="cell-name-suggestions" role="listbox" aria-label="历史特殊处理" hidden></div></div>`;
     return `<div class="field ${enabled?'enabled':''}" data-field-wrap="${key}"><div class="field-title"><label><input type="checkbox" data-apply="${key}" ${enabled?'checked':''}>${label}</label></div>${input}${syncTime?'<small class="muted">已带入本容器最近保存的处理时间，可修改或取消勾选。</small>':''}</div>`;
   }).join('')}</div>${mediumEditorMarkup(wells,(boot.layouts[c.type]||groupType(c.type))?c.medium_defaults:null)}${groupType(c.type)?'<p class="group-count-note muted">以下计数与培养基体积均按每瓶 / 皿填写。多选保存会将同一测量值分别写入所选成员；各成员独立保留记录，数值不会作为全组总量。</p>':''}${countEditorMarkup(wells)}<button type="submit" class="button primary">保存到 ${keys.length} 个培养单元</button><button type="button" class="button danger" id="clear-wells">清空所选内容</button></form>`;
-  bindLineageButtons($('#inspector'));bindLabRecordLinks($('#inspector'));
+  bindLineageButtons($('#selected-well-inspector'));bindLabRecordLinks($('#selected-well-inspector'));
+  bindPlateContentsEditor(c,keys,wells);
   $('#reset-day').hidden=hasComponents;
   bindMediumEditor(wells,(boot.layouts[c.type]||groupType(c.type))?c.medium_defaults:null);
   bindCountEditor(wells);
@@ -477,7 +735,7 @@ function openContainerEditor(){
     const type=$('#edit-type').value,input=$('#edit-quantity'),grouped=groupType(type);input.disabled=!grouped;if(!grouped)input.value='1';
     input.closest('.group-quantity-field').hidden=!grouped;
     const quantity=grouped?Number(input.value):1,next=grouped?groupKeys(type,quantity):vesselKeys(type),old=Object.entries(c.wells);
-    const lost=groupType(c.type)&&grouped?old.slice(next.length).filter(([,w])=>w.cell):old.filter(([key,w])=>w.cell&&!next.includes(key));
+    const lost=groupType(c.type)&&grouped?old.slice(next.length).filter(([,w])=>w.cell):old.filter(([key,w])=>(w.cell||plateWellLayout(w))&&!next.includes(key));
     $('#resize-summary').textContent=lost.length?'无法移除已有记录的成员：'+lost.map(([key])=>groupMemberLabel(c,key)).join('、')+'。结束成员会保留历史，不能直接删减已有记录。':'将保留原有成员记录；新增成员为空。保存后共 '+next.length+' 个培养单元。';
   }
   $('#edit-type').onchange=previewResize;$('#edit-quantity').oninput=previewResize;previewResize();
@@ -635,7 +893,161 @@ async function loadStorageStats() {
 }
 
 function renderBackup() {
-  $('#content').innerHTML=`<div class="backup-layout"><div class="section-head"><div><h2>数据与备份</h2><span class="muted">记录保存在本机数据库中。</span></div></div><div class="panel"><span class="eyebrow">LOCAL STORAGE</span><h3>你的实验记录，保存在这里</h3><code>${esc(boot.data_dir)}/culture.sqlite3</code><p class="muted">包含当前培养、每次操作前后的状态和全部历史快照。新建或修改点击保存后立即写入；还没有点击保存的表单内容不在备份中。</p><p class="muted" id="storage-usage"></p><p class="muted">最近独立备份：${esc(boot.last_backup||'尚无备份')}</p><div class="actions"><button id="download-backup" class="button primary">↓ 创建并下载完整备份</button><button id="compact-storage" type="button" class="button secondary">无损压缩历史记录</button></div><p class="muted">压缩前会创建并校验完整备份。压缩后仍可还原快照、查询历史和撤销操作。</p><p class="muted" style="margin-top:15px">下载 ZIP 内含数据库、完整 JSON 和恢复说明。每次保存快照也会在 data/backups 中自动备份并校验完整性。建议定期把 ZIP 另存到外置硬盘。</p></div><div class="panel" id="version-card"></div><div class="panel"><span class="eyebrow">EXPORT & HANDOFF</span><h3>带进你的实验记录</h3><p class="muted">日记导出为可用浏览器打开和打印的 HTML；CSV 可用 Excel 继续整理。导出内容包含容器编号、日期、孔位和关联实验编号。历史版本请从“历史日记”打开后导出。</p><div class="actions"><a href="/api/diary.html" class="button secondary">导出当前日记</a><a href="/api/export.csv" class="button secondary">导出当前 CSV</a></div></div><div class="panel"><span class="eyebrow">DAILY ROUTINE</span><h3>每天 22:00，留下一份当日记录</h3><p class="muted">本地服务运行时，每天北京时间 22:00 自动保存快照与备份。若当天 22:00 后重新启动，会补存当天状态并记录实际保存时间。电脑关机或服务未运行的日期不会补造记录。</p><p class="muted">自动留档不会替你确认实验事实。在“当前培养”核对并保存后，当天会多一份已核对版本。</p></div></div>`;
+  const backupDir = boot.backup_dir || `${boot.data_dir}/backups`;
+  const isCustomDir = Boolean(boot.is_custom_backup_dir);
+  const dirMissing = boot.backup_dir_exists === false && isCustomDir;
+  const backupDirControls = boot.mobile_client
+    ? '<p class="muted" style="margin:6px 0 0">如需修改或直接打开本地备份目录，请在电脑端操作。</p>'
+    : `<div class="actions backup-dir-actions"><button id="open-backup-dir" type="button" class="button secondary">打开当前备份地址</button><button id="edit-backup-dir" type="button" class="button secondary">修改本地备份地址</button>${isCustomDir ? '<button id="reset-backup-dir-quick" type="button" class="text-button">恢复默认目录</button>' : ''}</div><div id="backup-dir-editor" class="backup-dir-editor" hidden><label>本地备份目录路径<div class="backup-dir-input-row"><input id="backup-dir-input" type="text" value="${esc(backupDir)}" placeholder="本地文件夹的完整路径" autocomplete="off" spellcheck="false"><button id="pick-backup-dir" type="button" class="button secondary">选择文件夹…</button></div></label><p class="muted">可指向 云盘同步文件夹、外接硬盘或其他本地文件夹；保存后，新的手动备份与每晚 22:00 自动备份都会写入此处，原目录已有备份不会被删除。</p><div class="actions"><button id="save-backup-dir" type="button" class="button primary">保存备份地址</button>${isCustomDir ? '<button id="reset-backup-dir" type="button" class="button secondary">恢复默认目录</button>' : ''}<button id="cancel-backup-dir" type="button" class="button quiet">取消</button></div></div>`;
+
+  $('#content').innerHTML=`<div class="backup-layout"><div class="section-head"><div><h2>数据与备份</h2><span class="muted">记录保存在本机数据库中。</span></div></div><div class="panel"><span class="eyebrow">LOCAL STORAGE</span><h3>你的实验记录，保存在这里</h3><code>${esc(boot.data_dir)}/culture.sqlite3</code><p class="muted">包含当前培养、每次操作前后的状态和全部历史快照。新建或修改点击保存后立即写入；还没有点击保存的表单内容不在备份中。</p><p class="muted" id="storage-usage"></p><div class="backup-dir-box"><div class="backup-dir-head"><span>本地备份地址</span><span class="state-badges"><span class="state-badge ${isCustomDir ? 'is-saved' : ''}">${isCustomDir ? '自定义' : '默认'}</span>${dirMissing ? '<span class="state-badge is-pending">当前不可访问</span>' : ''}</span></div><code class="backup-dir-path">${esc(backupDir)}</code><p class="muted" style="margin:0 0 10px">最近独立备份：${esc(boot.last_backup||'尚无备份')}</p>${backupDirControls}</div><div class="actions"><button id="download-backup" class="button primary">↓ 创建并下载完整备份</button><button id="compact-storage" type="button" class="button secondary">无损压缩历史记录</button></div><p class="muted">压缩前会创建并校验完整备份。压缩后仍可还原快照、查询历史和撤销操作。</p><p class="muted" style="margin-top:15px">下载 ZIP 内含数据库、完整 JSON 和恢复说明。每次保存快照也会在当前备份地址中自动备份并校验完整性。建议定期把 ZIP 另存到外置硬盘。</p></div><div class="panel" id="word-templates-panel"><span class="eyebrow">RECORD TEMPLATES</span><h3>实验记录 Word 模版管理（标准版 + 自定义建档）</h3><p class="muted">已内置标准六栏目模版及 Transwell / 类器官初始模版；后续从「实验记录」导出 Word 时自动按默认模版排版。也支持上传你自己现有的 <code>.docx</code> 模版建档（自动解析栏目结构，或保留带 <code>{{title}}</code> / <code>{{section:purpose}}</code> 占位符的原版样式精准套打）。</p><div id="word-tpl-list" class="word-tpl-list"><p class="muted">正在加载模版列表…</p></div><form id="word-tpl-upload-form" class="word-tpl-upload" novalidate><div class="two"><label>模版名称（选填，留空取文件名）<input id="word-tpl-name" type="text" maxlength="80" placeholder="如 课题组正式六栏目模版 / 医院记录表"></label><label>上传自备 Word 模版（.docx）<input id="word-tpl-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required></label></div><label class="inline-check" style="margin-bottom:10px"><input id="word-tpl-default" type="checkbox" checked>建档后设为默认 Word 导出模版</label><div class="actions"><button id="word-tpl-submit" type="submit" class="button primary">上传并建档模版</button></div></form></div><div class="panel" id="version-card"></div><div class="panel"><span class="eyebrow">EXPORT & HANDOFF</span><h3>带进你的实验记录</h3><p class="muted">日记导出为可用浏览器打开和打印的 HTML；CSV 可用 Excel 继续整理。导出内容包含容器编号、日期、孔位和关联实验编号。历史版本请从“历史日记”打开后导出。</p><div class="actions"><a href="/api/diary.html" class="button secondary">导出当前日记</a><a href="/api/export.csv" class="button secondary">导出当前 CSV</a></div></div><div class="panel"><span class="eyebrow">DAILY ROUTINE</span><h3>每天 22:00，留下一份当日记录</h3><p class="muted">本地服务运行时，每天北京时间 22:00 自动保存快照与备份。若当天 22:00 后重新启动，会补存当天状态并记录实际保存时间。电脑关机或服务未运行的日期不会补造记录。</p><p class="muted">自动留档不会替你确认实验事实。在“当前培养”核对并保存后，当天会多一份已核对版本。</p></div></div>`;
+  const renderWordTemplates = async () => {
+    const listEl = $('#word-tpl-list');
+    if (!listEl) return;
+    try {
+      const data = await api('/api/word-templates');
+      const items = data.templates || [];
+      listEl.innerHTML = items.map(t => `<div class="word-tpl-item" data-tpl-id="${esc(t.id)}">
+        <div>
+          <strong>${esc(t.name)}</strong>
+          <span class="state-badges" style="margin-left:6px">
+            ${t.is_default ? '<span class="state-badge is-saved">当前默认导出</span>' : ''}
+            <span class="state-badge">${t.builtin ? '内置标准' : (t.mode === 'placeholder' ? '占位符套打' : '结构解析')}</span>
+          </span>
+          <p>${esc(t.description || t.scope || '')}${!t.builtin && t.sections?.length ? ` · 栏目：${esc(t.sections.map(s => s.title).join(' / '))}` : ''}</p>
+        </div>
+        <div class="actions">
+          <a class="button secondary" href="/api/word-templates/${encodeURIComponent(t.id)}/download">下载 .docx</a>
+          ${!t.is_default ? `<button type="button" class="button secondary" data-tpl-set-default="${esc(t.id)}">设为默认</button>` : ''}
+          ${!t.builtin ? `<button type="button" class="text-button" data-tpl-del="${esc(t.id)}">删除</button>` : ''}
+        </div>
+      </div>`).join('') || '<p class="muted">暂无模版</p>';
+      listEl.querySelectorAll('[data-tpl-set-default]').forEach(btn => btn.onclick = async () => {
+        try {
+          await api('/api/word-templates/default', {template_id: btn.dataset.tplSetDefault});
+          await renderWordTemplates();
+          toast('已切换默认 Word 导出模版');
+        } catch (err) { toast(err.message, true); }
+      });
+      listEl.querySelectorAll('[data-tpl-del]').forEach(btn => btn.onclick = async () => {
+        if (!confirm('确认删除该自定义模版？（不会影响已导出的历史 Word 文档）')) return;
+        try {
+          await api('/api/word-templates/delete', {template_id: btn.dataset.tplDel});
+          await renderWordTemplates();
+          toast('自定义模版已删除');
+        } catch (err) { toast(err.message, true); }
+      });
+    } catch (err) {
+      listEl.innerHTML = `<p class="muted">加载模版失败：${esc(err.message)}</p>`;
+    }
+  };
+  renderWordTemplates();
+  const tplUploadForm = $('#word-tpl-upload-form');
+  if (tplUploadForm) tplUploadForm.onsubmit = async e => {
+    e.preventDefault();
+    const fileInput = $('#word-tpl-file');
+    const file = fileInput?.files?.[0];
+    if (!file) { toast('请先选择一份 .docx 模版文件', true); return; }
+    if (!/\.docx$/i.test(file.name) || file.size > 10 * 1024 * 1024) { toast('请选择不超过 10 MiB 的 .docx 文件', true); return; }
+    const submitBtn = $('#word-tpl-submit');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '正在解析建档…'; }
+    try {
+      const buf = await file.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      const b64 = btoa(bin);
+      const res = await api('/api/word-templates/import', {
+        name: ($('#word-tpl-name')?.value || '').trim(),
+        filename: file.name,
+        content_base64: b64,
+        set_as_default: Boolean($('#word-tpl-default')?.checked),
+      });
+      if ($('#word-tpl-name')) $('#word-tpl-name').value = '';
+      if (fileInput) fileInput.value = '';
+      await renderWordTemplates();
+      toast(`模版「${res.template.name}」已建档（${res.template.mode === 'placeholder' ? '占位符套打模式' : `识别 ${res.template.sections.length} 个栏目`}）`);
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = '上传并建档模版'; }
+    }
+  };
+  const openDirBtn = $('#open-backup-dir');
+  if (openDirBtn) openDirBtn.onclick = async () => {
+    openDirBtn.disabled = true;
+    try {
+      const res = await api('/api/backup-dir/open', {});
+      toast(`已打开备份目录：${res.opened}`);
+    } catch (error) {
+      toast(error.message, true);
+    } finally {
+      openDirBtn.disabled = false;
+    }
+  };
+  const editor = $('#backup-dir-editor');
+  const dirInput = $('#backup-dir-input');
+  const editDirBtn = $('#edit-backup-dir');
+  if (editDirBtn && editor) editDirBtn.onclick = () => {
+    editor.hidden = !editor.hidden;
+    if (!editor.hidden && dirInput) {
+      dirInput.value = boot.backup_dir || `${boot.data_dir}/backups`;
+      dirInput.focus();
+      dirInput.select();
+    }
+  };
+  const cancelDirBtn = $('#cancel-backup-dir');
+  if (cancelDirBtn && editor) cancelDirBtn.onclick = () => { editor.hidden = true; };
+  const pickDirBtn = $('#pick-backup-dir');
+  if (pickDirBtn && dirInput) pickDirBtn.onclick = async () => {
+    pickDirBtn.disabled = true;
+    const prev = pickDirBtn.textContent;
+    pickDirBtn.textContent = '请在系统窗口选择…';
+    try {
+      const res = await api('/api/backup-dir/pick', {});
+      if (!res.cancelled && res.path) {
+        dirInput.value = res.path;
+        dirInput.focus();
+        toast('已选择文件夹，点击“保存备份地址”即可生效');
+      }
+    } catch (error) {
+      toast(error.message, true);
+    } finally {
+      pickDirBtn.disabled = false;
+      pickDirBtn.textContent = prev;
+    }
+  };
+  const applyBackupDir = async (payload, okMsg) => {
+    if (busy) return;
+    busy = true;
+    try {
+      const res = await api('/api/backup-dir', payload);
+      Object.assign(boot, res);
+      renderBackup();
+      toast(okMsg);
+    } catch (error) {
+      toast(error.message, true);
+    } finally {
+      busy = false;
+      if (typeof renderUndoControl === 'function') renderUndoControl();
+    }
+  };
+  const saveDirBtn = $('#save-backup-dir');
+  if (saveDirBtn && dirInput) saveDirBtn.onclick = () => {
+    const val = dirInput.value.trim();
+    if (!val) { toast('请输入或选择一个有效的备份目录路径', true); dirInput.focus(); return; }
+    applyBackupDir({path: val}, `本地备份地址已更新为：${val}`);
+  };
+  if (dirInput) dirInput.onkeydown = e => {
+    if (e.key === 'Enter') { e.preventDefault(); saveDirBtn?.click(); }
+    else if (e.key === 'Escape' && editor) { editor.hidden = true; }
+  };
+  const bindReset = btn => {
+    if (!btn) return;
+    btn.onclick = () => applyBackupDir({reset: true}, '已恢复默认本地备份目录');
+  };
+  bindReset($('#reset-backup-dir'));
+  bindReset($('#reset-backup-dir-quick'));
   renderStorageUsage();
   renderVersionCard();
   $('#compact-storage').onclick=async event=>{

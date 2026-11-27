@@ -1,4 +1,5 @@
 """Check a temporary notebook only, via the packaged user's normal CMD entry."""
+import base64
 import hashlib
 import io
 import json
@@ -40,7 +41,7 @@ def main():
             installed = (ROOT/'VERSION').read_text(encoding='ascii').strip()
             with http.open(base+'/api/version',timeout=8) as response:
                 assert json.load(response)['version']==installed==boot['app_version']
-            assert installed=='1.6.0-preview.1', installed
+            assert installed=='1.7.0-preview.1', installed
             cli=subprocess.check_output(command+['--version'],cwd=ROOT,encoding='utf-8')
             assert installed in cli, cli
             with http.open(base+'/api/storage-stats',timeout=8) as response:
@@ -65,6 +66,28 @@ def main():
                         'payload':lot_data}).encode(),headers={'Content-Type':'application/json','X-Lab-Token':boot['token']})
             with http.open(req,timeout=10) as res: lot=json.load(res)['state']['frozen_batches'][0]
             assert lot['cell_kind']==lot_data['cell_kind'] and lot['resistance_tags']==lot_data['resistance_tags']
+            with http.open(base+'/api/word-templates',timeout=10) as res:
+                catalogue=json.load(res)
+            builtins=[t for t in catalogue['templates'] if t['builtin']]
+            assert len(builtins)==3
+            templates=ROOT/'app/templates'
+            expected={'Transwell_初始实验记录模版_V1.0_六栏目.docx': 'b795ba90894786ffa98eea6b859cf356e3df4285ead993dc3988fb41df7cd9e2', '类器官培养与共培养_初始实验记录模版_V1.0_六栏目.docx': '435fcefe19514d5b240b126948715a52d5c7adcac7b7f39d2184a2449a0c0d9b', 'LabNote_标准实验记录模版_V1.0_六栏目.docx': '467b4475606db79ea4393236d53ebde465ab952ecfa87040f3c3275d20ac996c'}
+            assert {p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in templates.glob('*.docx')}==expected
+            def post(route,body):
+                req=Request(base+route,data=json.dumps(body).encode(),headers={'Content-Type':'application/json','X-Lab-Token':boot['token']})
+                with http.open(req,timeout=15) as res:return json.load(res)
+            with http.open(base+'/api/state',timeout=8) as res: current=json.load(res)['state']
+            saved=post('/api/command',{'action':'lab_record_save','revision':current['revision'],
+                      'payload':{'type':'flow','variant':'assay','title':'Template smoke check','record_date':'2020-01-01','status':'draft'}})['state']
+            rec=saved['lab_records'][-1]
+            for template in builtins:
+                result=post('/api/lab/word',{'record_id':rec['id'],'version':rec['version'],
+                           'record_updated_at':rec['updated_at'],'revision':saved['revision'],'template_id':template['id']})
+                saved=result['state']
+                with ZipFile(io.BytesIO(base64.b64decode(result['document']))) as document:
+                    assert 'word/document.xml' in document.namelist()
+            path=str(Path(tmp)/'Custom backup 测试')
+            assert post('/api/backup-dir',{'path':path})['is_custom_backup_dir']
             req=Request(base+'/api/backup',data=b'{}',headers={'Content-Type':'application/json','X-Lab-Token':boot['token']})
             with http.open(req,timeout=10) as res:backup=json.load(res)
             with http.open(base+backup['url'],timeout=10) as res, ZipFile(io.BytesIO(res.read())) as z:

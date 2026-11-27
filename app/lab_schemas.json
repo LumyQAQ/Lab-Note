@@ -2285,6 +2285,563 @@
           ]
         }
       }
+    },
+    "transwell": {
+      "label": "Transwell 迁移 / 侵袭 / 共培养",
+      "prefix": "TW",
+      "statuses": [
+        [
+          "draft",
+          "草稿"
+        ],
+        [
+          "planned",
+          "计划"
+        ],
+        [
+          "running",
+          "进行中"
+        ],
+        [
+          "completed",
+          "已完成"
+        ],
+        [
+          "cancelled",
+          "已取消"
+        ]
+      ],
+      "variants": {
+        "assay": {
+          "plate_today_kind": "transwell",
+          "label": "Transwell 双室实验",
+          "fields": [
+            {
+              "key": "objective",
+              "label": "实验目的",
+              "type": "textarea"
+            },
+            {
+              "key": "plate_spec",
+              "label": "Transwell 板型与品牌",
+              "type": "text"
+            },
+            {
+              "key": "pore_size",
+              "label": "聚碳酸酯膜孔径（μm）",
+              "type": "select",
+              "options": [
+                "0.4",
+                "3.0",
+                "5.0",
+                "8.0"
+              ]
+            },
+            {
+              "key": "matrigel_coating",
+              "label": "Matrigel 包被条件",
+              "type": "text"
+            },
+            {
+              "key": "stain_method",
+              "label": "固定与染色 / 终点方法",
+              "type": "text"
+            },
+            {
+              "key": "microscope",
+              "label": "成像设备 / 检测仪器",
+              "type": "text"
+            },
+            {
+              "key": "upper_medium_prep",
+              "label": "上室培养基 / 细胞悬液配制",
+              "type": "textarea"
+            },
+            {
+              "key": "lower_medium_prep",
+              "label": "下室趋化液 / 共培养体系配制",
+              "type": "textarea"
+            },
+            {
+              "key": "coating_prep",
+              "label": "基质胶稀释与预包被配制",
+              "type": "textarea"
+            },
+            {
+              "key": "seeding_protocol",
+              "label": "上下室铺板与加液步骤",
+              "type": "textarea"
+            },
+            {
+              "key": "incubation_hours",
+              "label": "孵育时长（h）",
+              "type": "number",
+              "min": 0
+            },
+            {
+              "key": "fixation_staining_steps",
+              "label": "擦拭、固定、染色与拍照/收集步骤",
+              "type": "textarea"
+            },
+            {
+              "key": "result_notes",
+              "label": "本轮总结与异常说明",
+              "type": "textarea"
+            }
+          ],
+          "tables": [
+            {
+              "key": "chamber_groups",
+              "label": "上下室铺板分组表",
+              "columns": [
+                {
+                  "key": "well",
+                  "label": "孔位",
+                  "type": "text"
+                },
+                {
+                  "key": "group",
+                  "label": "分组",
+                  "type": "text"
+                },
+                {
+                  "key": "mode",
+                  "label": "实验类型",
+                  "type": "text"
+                },
+                {
+                  "key": "upper_cell",
+                  "label": "上室细胞",
+                  "type": "text"
+                },
+                {
+                  "key": "upper_count",
+                  "label": "上室细胞数",
+                  "type": "text"
+                },
+                {
+                  "key": "upper_volume_ul",
+                  "label": "上室体积（μL）",
+                  "type": "text"
+                },
+                {
+                  "key": "lower_condition",
+                  "label": "下室细胞 / 趋化条件",
+                  "type": "text"
+                },
+                {
+                  "key": "lower_volume_ul",
+                  "label": "下室体积（μL）",
+                  "type": "text"
+                },
+                {
+                  "key": "coating",
+                  "label": "包被条件",
+                  "type": "text"
+                }
+              ]
+            },
+            {
+              "key": "results",
+              "label": "终点穿膜 / 共培养结果表",
+              "columns": [
+                {
+                  "key": "well",
+                  "label": "孔位",
+                  "type": "text"
+                },
+                {
+                  "key": "group",
+                  "label": "分组",
+                  "type": "text"
+                },
+                {
+                  "key": "metric",
+                  "label": "检测指标 / 视野",
+                  "type": "text"
+                },
+                {
+                  "key": "value",
+                  "label": "数值",
+                  "type": "number"
+                },
+                {
+                  "key": "unit",
+                  "label": "单位",
+                  "type": "text"
+                },
+                {
+                  "key": "notes",
+                  "label": "备注",
+                  "type": "text"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "organoid": {
+      "label": "类器官培养 / 共培养",
+      "prefix": "ORG",
+      "statuses": [
+        [
+          "draft",
+          "草稿"
+        ],
+        [
+          "planned",
+          "计划"
+        ],
+        [
+          "running",
+          "进行中"
+        ],
+        [
+          "completed",
+          "已完成"
+        ],
+        [
+          "cancelled",
+          "已取消"
+        ]
+      ],
+      "variants": {
+        "culture": {
+          "plate_today_kind": "organoid/culture",
+          "label": "类器官培养与传代",
+          "fields": [
+            {
+              "key": "objective",
+              "label": "实验目的",
+              "type": "textarea"
+            },
+            {
+              "key": "organoid_source",
+              "label": "类器官名称与组织来源",
+              "type": "text"
+            },
+            {
+              "key": "patient_model_id",
+              "label": "患者 / 模型编号",
+              "type": "text"
+            },
+            {
+              "key": "passage",
+              "label": "当前代次",
+              "type": "text"
+            },
+            {
+              "key": "matrix_brand_lot",
+              "label": "基质胶（Matrigel / BME）品牌与批号",
+              "type": "text"
+            },
+            {
+              "key": "plate_spec",
+              "label": "培养板规格",
+              "type": "text"
+            },
+            {
+              "key": "imaging_instrument",
+              "label": "成像 / 活性检测仪器",
+              "type": "text"
+            },
+            {
+              "key": "matrix_ratio",
+              "label": "基质胶浓度 / 稀释比例",
+              "type": "text"
+            },
+            {
+              "key": "dome_volume_ul",
+              "label": "每孔液滴体积（μL）",
+              "type": "number",
+              "min": 0
+            },
+            {
+              "key": "organoid_medium_formula",
+              "label": "类器官完全培养基与因子配方",
+              "type": "textarea"
+            },
+            {
+              "key": "dissociation_embedding_steps",
+              "label": "消化传代、包埋成胶与换液步骤",
+              "type": "textarea"
+            },
+            {
+              "key": "result_notes",
+              "label": "生长形态总结与后续计划",
+              "type": "textarea"
+            }
+          ],
+          "tables": [
+            {
+              "key": "plating_groups",
+              "label": "类器官铺板分组表",
+              "columns": [
+                {
+                  "key": "well",
+                  "label": "孔位",
+                  "type": "text"
+                },
+                {
+                  "key": "group",
+                  "label": "分组",
+                  "type": "text"
+                },
+                {
+                  "key": "organoid",
+                  "label": "类器官 / 代次",
+                  "type": "text"
+                },
+                {
+                  "key": "matrix",
+                  "label": "基质胶比例",
+                  "type": "text"
+                },
+                {
+                  "key": "dome",
+                  "label": "液滴体积 × 数量",
+                  "type": "text"
+                },
+                {
+                  "key": "medium",
+                  "label": "培养基 / 处理",
+                  "type": "text"
+                },
+                {
+                  "key": "final_volume_ul",
+                  "label": "终体积（μL）",
+                  "type": "text"
+                }
+              ]
+            },
+            {
+              "key": "results",
+              "label": "形态观察与活性结果表",
+              "columns": [
+                {
+                  "key": "well",
+                  "label": "孔位",
+                  "type": "text"
+                },
+                {
+                  "key": "group",
+                  "label": "分组",
+                  "type": "text"
+                },
+                {
+                  "key": "timepoint",
+                  "label": "观察时间点",
+                  "type": "text"
+                },
+                {
+                  "key": "metric",
+                  "label": "指标（直径 / 活性 / 数量）",
+                  "type": "text"
+                },
+                {
+                  "key": "value",
+                  "label": "数值",
+                  "type": "number"
+                },
+                {
+                  "key": "unit",
+                  "label": "单位",
+                  "type": "text"
+                },
+                {
+                  "key": "notes",
+                  "label": "备注",
+                  "type": "text"
+                }
+              ]
+            }
+          ]
+        },
+        "coculture": {
+          "plate_today_kind": "organoid/coculture",
+          "label": "类器官免疫共培养",
+          "fields": [
+            {
+              "key": "objective",
+              "label": "实验目的",
+              "type": "textarea"
+            },
+            {
+              "key": "organoid_source",
+              "label": "靶类器官名称与来源",
+              "type": "text"
+            },
+            {
+              "key": "patient_model_id",
+              "label": "患者 / 模型编号",
+              "type": "text"
+            },
+            {
+              "key": "passage",
+              "label": "类器官代次",
+              "type": "text"
+            },
+            {
+              "key": "matrix_brand_lot",
+              "label": "基质胶品牌与批号（如使用）",
+              "type": "text"
+            },
+            {
+              "key": "plate_spec",
+              "label": "共培养孔板（如低吸附 U 底 96 孔板）",
+              "type": "text"
+            },
+            {
+              "key": "imaging_instrument",
+              "label": "成像 / 发光 / 流式检测仪器",
+              "type": "text"
+            },
+            {
+              "key": "matrix_ratio",
+              "label": "基质胶比例 / 悬浮条件",
+              "type": "text"
+            },
+            {
+              "key": "dome_volume_ul",
+              "label": "每孔液滴体积（μL，如有）",
+              "type": "number",
+              "min": 0
+            },
+            {
+              "key": "organoid_medium_formula",
+              "label": "类器官基础培养基配方",
+              "type": "textarea"
+            },
+            {
+              "key": "coculture_medium_formula",
+              "label": "共培养体系培养基与细胞因子配制",
+              "type": "textarea"
+            },
+            {
+              "key": "coculture_mode",
+              "label": "共培养方式",
+              "type": "select",
+              "options": [
+                "胶面铺加",
+                "胶内混埋",
+                "低吸附悬浮共培养",
+                "Transwell 间接共培养"
+              ]
+            },
+            {
+              "key": "dissociation_embedding_steps",
+              "label": "靶类器官计数口径与共培养铺板步骤",
+              "type": "textarea"
+            },
+            {
+              "key": "coculture_duration_h",
+              "label": "共培养时长（h）",
+              "type": "number",
+              "min": 0
+            },
+            {
+              "key": "readout_method",
+              "label": "杀伤 / 活性 / 成像终点方法",
+              "type": "text"
+            },
+            {
+              "key": "result_notes",
+              "label": "本轮共培养总结与待补项",
+              "type": "textarea"
+            }
+          ],
+          "tables": [
+            {
+              "key": "plating_groups",
+              "label": "类器官共培养铺板分组表",
+              "columns": [
+                {
+                  "key": "well",
+                  "label": "孔位",
+                  "type": "text"
+                },
+                {
+                  "key": "group",
+                  "label": "分组",
+                  "type": "text"
+                },
+                {
+                  "key": "organoid",
+                  "label": "类器官来源",
+                  "type": "text"
+                },
+                {
+                  "key": "matrix",
+                  "label": "基质胶 / 模式",
+                  "type": "text"
+                },
+                {
+                  "key": "effector",
+                  "label": "效应细胞",
+                  "type": "text"
+                },
+                {
+                  "key": "et_ratio",
+                  "label": "E:T 比（含计数口径）",
+                  "type": "text"
+                },
+                {
+                  "key": "effector_count",
+                  "label": "效应细胞数 / 孔",
+                  "type": "text"
+                },
+                {
+                  "key": "final_volume_ul",
+                  "label": "终体积（μL）",
+                  "type": "text"
+                }
+              ]
+            },
+            {
+              "key": "results",
+              "label": "共培养杀伤与成像结果表",
+              "columns": [
+                {
+                  "key": "well",
+                  "label": "孔位",
+                  "type": "text"
+                },
+                {
+                  "key": "group",
+                  "label": "分组",
+                  "type": "text"
+                },
+                {
+                  "key": "timepoint",
+                  "label": "时间点",
+                  "type": "text"
+                },
+                {
+                  "key": "metric",
+                  "label": "检测指标",
+                  "type": "text"
+                },
+                {
+                  "key": "value",
+                  "label": "数值",
+                  "type": "number"
+                },
+                {
+                  "key": "unit",
+                  "label": "单位",
+                  "type": "text"
+                },
+                {
+                  "key": "notes",
+                  "label": "备注",
+                  "type": "text"
+                }
+              ]
+            }
+          ]
+        }
+      }
     }
   }
 }

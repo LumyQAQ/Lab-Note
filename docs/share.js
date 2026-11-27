@@ -41,7 +41,7 @@ const INITIAL_VISIBLE = 3;
 
   const MODES = {
     culture: {
-      compat: '支持 16 种内置容器：6 / 12 / 24 / 48 / 96 孔板（含白底/黑底）、T25 / T75 / T175 培养瓶、35–150mm 培养皿，瓶/皿支持 1–100 个同组管理。',
+      compat: '支持 20 种内置容器：6 / 12 / 24 / 48 / 96 孔板（含白底/黑底）、T25 / T75 / T175 培养瓶、35–150mm 培养皿，另含 Transwell 6/12/24 孔板和低吸附 U 底 96 孔板；瓶/皿支持 1–100 个同组管理。',
       defaultPreset: 'plate-24',
       presets: [
         {id: 'plate-6', label: '6 孔板', kind: 'plate', rows: 2, cols: 3, title: '6 孔板', micro: '培养容器预览 · 0 / 6 已填写', cls: 'spacious'},

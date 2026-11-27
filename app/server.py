@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Desktop loopback notebook with optional paired HTTPS access."""
 import argparse
+import base64
+import binascii
 import csv
 import errno
 import hashlib
@@ -14,6 +16,7 @@ import secrets
 import socket
 import sqlite3
 import sys
+import subprocess
 import threading
 import traceback
 import zipfile
@@ -21,7 +24,7 @@ from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from datetime import date
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
@@ -31,6 +34,8 @@ from medium import medium_summary
 from cell_count import count_summary,estimate_total,seeding_summary
 from lab_records import load_schema
 from lab_exports import record_html, SOFTWARE_CREDIT
+from word_export import make_word, edition_meta, config as word_config
+import word_templates
 from group_units import member_active
 from platform_config import default_data_dir, port_value
 from mobile_access import COOKIE, DEVICE_LIFETIME, MobileAccess, MobileListener
@@ -39,6 +44,79 @@ DEFAULT_DATA = default_data_dir()
 STATIC_MIME = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css'}
 DEVICE_FILES = {'/devices': 'devices.html', '/devices.js': 'devices.js',
                 '/devices.css': 'devices.css', '/devices/qr.js': 'vendor/qrcodegen.js'}
+
+
+def open_local_directory(directory):
+    target = Path(directory)
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ValueError(f'无法打开或创建备份目录（{target}）：{exc.strerror or exc}') from exc
+    if sys.platform == 'darwin':
+        result = subprocess.run(['/usr/bin/open', str(target)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=15)
+        if result.returncode != 0:
+            err = result.stderr.decode('utf-8', errors='replace').strip()
+            raise ValueError(f'无法在访达中打开目录：{err or target}')
+    elif os.name == 'nt':
+        os.startfile(str(target))
+    else:
+        subprocess.Popen(['xdg-open', str(target)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return target
+
+
+def pick_local_directory(initial_dir=None):
+    init = Path(initial_dir) if initial_dir else None
+    if sys.platform == 'darwin':
+        if init and init.is_dir():
+            cmd = [
+                '/usr/bin/osascript',
+                '-e', 'on run argv',
+                '-e', 'activate',
+                '-e', 'set defaultLoc to POSIX file (item 1 of argv)',
+                '-e', 'return POSIX path of (choose folder with prompt "选择 Lab Note 本地备份目录" default location defaultLoc)',
+                '-e', 'end run',
+                str(init),
+            ]
+        else:
+            cmd = [
+                '/usr/bin/osascript',
+                '-e', 'activate',
+                '-e', 'return POSIX path of (choose folder with prompt "选择 Lab Note 本地备份目录")',
+            ]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        except subprocess.TimeoutExpired as exc:
+            raise ValueError('等待选择文件夹超时，请重试或直接手动输入路径。') from exc
+        if proc.returncode != 0:
+            stderr = (proc.stderr or '').strip()
+            if '-128' in stderr or 'User canceled' in stderr or '用户已取消' in stderr:
+                return None
+            raise ValueError(f'无法打开系统文件夹选择器：{stderr or "请直接手动输入备份目录路径。"}')
+        chosen = (proc.stdout or '').strip()
+        if not chosen:
+            return None
+        return str(Path(chosen).resolve(strict=False))
+    if os.name == 'nt':
+        env = dict(os.environ)
+        if init and init.is_dir():
+            env['LAB_NOTE_INIT_DIR'] = str(init)
+        script = (
+            'Add-Type -AssemblyName System.Windows.Forms; '
+            '$d = New-Object System.Windows.Forms.FolderBrowserDialog; '
+            '$d.Description = "选择 Lab Note 本地备份目录"; '
+            'if ($env:LAB_NOTE_INIT_DIR) { $d.SelectedPath = $env:LAB_NOTE_INIT_DIR }; '
+            'if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $d.SelectedPath }'
+        )
+        try:
+            proc = subprocess.run(['powershell', '-NoProfile', '-STA', '-Command', script],
+                                  capture_output=True, text=True, env=env, timeout=300)
+        except subprocess.TimeoutExpired as exc:
+            raise ValueError('等待选择文件夹超时，请重试或直接手动输入路径。') from exc
+        if proc.returncode != 0:
+            raise ValueError('无法打开系统文件夹选择器，请直接手动输入备份目录路径。')
+        chosen = (proc.stdout or '').strip()
+        return str(Path(chosen).resolve(strict=False)) if chosen else None
+    raise ValueError('当前系统暂不支持弹出文件夹选择器，请直接输入备份目录路径。')
 
 
 def export_rows(state, record_date):
@@ -104,7 +182,8 @@ def make_server(data_dir=DEFAULT_DATA, port=8875, *, mobile_port=8876):
             for key, value in (headers or {}).items():
                 self.send_header(key, value)
             if filename:
-                self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+                fallback = re.sub(r'[^A-Za-z0-9_.-]', '_', filename) or 'download'
+                self.send_header('Content-Disposition', f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(filename, safe='')}")
             self.end_headers()
             self.wfile.write(body)
 
@@ -167,7 +246,7 @@ def make_server(data_dir=DEFAULT_DATA, port=8875, *, mobile_port=8876):
                         return self.pair_page()
                     return self.send(401, {'error': '请在此设备的工作台首页重新配对。'})
                 if self.mobile and (path.startswith(('/devices', '/api/backups/')) or path in
-                                    ('/api/sharing', '/api/health', '/api/version', '/api/update-check', '/api/storage-stats')):
+                                    ('/api/sharing', '/api/health', '/api/version', '/api/update-check', '/api/storage-stats', '/api/backup-status', '/api/backup-dir')):
                     return self.send(403, {'error': '请在电脑上管理工作台。'})
                 if path == '/api/sharing':
                     return self.send(200, {**sharing.status(), 'token': token})
@@ -189,6 +268,10 @@ def make_server(data_dir=DEFAULT_DATA, port=8875, *, mobile_port=8876):
                     from update_check import check_for_updates
                     force = parse_qs(parsed.query).get('force', ['0'])[0] in ('1','true','yes')
                     return self.send(200, check_for_updates(force=force))
+                if path == '/api/backup-dir':
+                    return self.send(200, store.backup_dir_info())
+                if path == '/api/backup-status':
+                    return self.send(200, store.backup_status())
                 if path == '/api/storage-stats':
                     return self.send(200, store.storage_stats())
                 if path == '/api/cryo/box-print':
@@ -202,9 +285,8 @@ def make_server(data_dir=DEFAULT_DATA, port=8875, *, mobile_port=8876):
                     from update_check import configured_download_url, configured_repo, read_app_version
                     desktop = {}
                     if not self.mobile:
-                        backups = sorted(store.directory.joinpath('backups').glob('*.sqlite3'), reverse=True)
                         desktop = {'github_repo': configured_repo(), 'download_url': configured_download_url(),
-                                   'data_dir': str(store.directory), 'last_backup': backups[0].name if backups else None}
+                                   'data_dir': str(store.directory), **store.backup_dir_info()}
                     self.send(200, {'app':'lab-culture-v1', 'state':store.state(), 'token':csrf,
                                     'app_version':read_app_version(), 'mobile_client':self.mobile,
                                     'today':current_time().date().isoformat(), 'types':TYPES, 'layouts':LAYOUTS,
@@ -214,7 +296,7 @@ def make_server(data_dir=DEFAULT_DATA, port=8875, *, mobile_port=8876):
                                     'medium_recipes':store.medium_recipes(),
                                     'count_history':store.count_history(),
                                     'undo':store.undo_info(),'workday':store.workday(),
-                                    'lab_schema':load_schema(), **desktop})
+                                    'lab_schema':load_schema(), 'word_format':word_config(), 'plate_contents_version':2, **desktop})
                 elif path == '/api/command-status':
                     request_id = parse_qs(parsed.query).get('request_id', [''])[0]
                     self.send(200, store.command_status(request_id))
@@ -222,6 +304,14 @@ def make_server(data_dir=DEFAULT_DATA, port=8875, *, mobile_port=8876):
                     self.send(200, store.snapshots())
                 elif path == '/api/lab/schema':
                     self.send(200,load_schema())
+                elif path == '/api/word-templates':
+                    self.send(200, word_templates.list_templates(store.directory))
+                elif path.startswith('/api/word-templates/') and path.endswith('/download'):
+                    tpl_id = path[len('/api/word-templates/'):-len('/download')].strip('/')
+                    if not tpl_id or '/' in tpl_id or '..' in tpl_id:
+                        raise ValueError('无效模板编号')
+                    blob, fname = word_templates.read_template_bytes(store.directory, tpl_id)
+                    self.send(200, blob, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', fname)
                 elif path.startswith('/api/lab/records/'):
                     leaf=path.rsplit('/',1)[-1];record_id,ext=leaf.rsplit('.',1) if '.' in leaf else (leaf,'')
                     snap_id=parse_qs(parsed.query).get('snapshot',[None])[0]
@@ -277,8 +367,8 @@ def make_server(data_dir=DEFAULT_DATA, port=8875, *, mobile_port=8876):
                     name = path.rsplit('/', 1)[-1]
                     if not name.startswith('culture-') or not name.endswith('.sqlite3') or '/' in name or '\\' in name or '..' in name:
                         raise ValueError('无效备份名')
-                    backup = store.directory / 'backups' / name
-                    if not backup.is_file():
+                    backup = store.resolve_backup_file(name)
+                    if backup is None:
                         return self.send(404, {'error':'备份不存在'})
                     with closing(sqlite3.connect(backup)) as conn:
                         tables={row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -291,11 +381,17 @@ def make_server(data_dir=DEFAULT_DATA, port=8875, *, mobile_port=8876):
                     buffer = io.BytesIO()
                     with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as archive:
                         archive.write(backup, 'culture.sqlite3')
+                        template_snapshot = backup.with_suffix('.templates.zip')
+                        if template_snapshot.is_file() and not template_snapshot.is_symlink():
+                            with zipfile.ZipFile(template_snapshot) as templates:
+                                for member in templates.infolist():
+                                    if member.filename == 'word_templates/registry.json' or re.fullmatch(r'word_templates/TPL-[A-F0-9]{12}\.docx', member.filename):
+                                        archive.writestr(member.filename, templates.read(member))
                         archive.writestr('history.json', json.dumps(exported, ensure_ascii=False, indent=2))
                         archive.writestr('original-file.sha256', backup.with_suffix('.sha256').read_text().split()[0]+'  culture.sqlite3\n')
-                        archive.writestr('恢复说明.txt', '数据库含完整当前记录、操作历史和每日快照。\n将 culture.sqlite3 放入新的恢复目录；运行 python3 server.py --data-dir /恢复目录 --port 8890 验证。不要覆盖正在使用的数据库。完整步骤见程序 README.md。')
+                        archive.writestr('恢复说明.txt', '数据库含完整当前记录、操作历史和每日快照。若包含 word_templates 文件夹，请一并复制到恢复目录以恢复个人模板和默认模板设置。\n将 culture.sqlite3 放入新的恢复目录；运行 python3 server.py --data-dir /恢复目录 --port 8890 验证。不要覆盖正在使用的数据库。完整步骤见程序 README.md。')
                     self.send(200, buffer.getvalue(), 'application/zip', name.replace('.sqlite3','.zip'))
-                elif path in ['/', '/index.html', '/theme.js', '/theme-dark.css', '/cryo-print.js', '/groups.js', '/well-groups.js', '/well-groups.css', '/assay-groups.js', '/manual-groups.js', '/manual-groups.css', '/app.js', '/style.css', '/selection.js', '/source-picker.js', '/source-picker.css', '/replate.js', '/replate.css', '/quick-medium.js', '/quick-medium.css', '/transfer.js', '/transfer-cards.js', '/occupied-targets.js', '/occupied-targets.css', '/archived-cultures.js', '/archived-cultures.css', '/lineage-links.js', '/relocation.js', '/relocation.css', '/autocomplete.js', '/medium.js', '/medium.css','/count.js','/count.css','/workday.js','/workday.css','/home.js','/home.css','/experiments.js','/experiments.css','/result-paste.js', '/cryo-storage.js', '/cryo-storage.css']:
+                elif path in ['/', '/index.html', '/theme.js', '/theme-dark.css', '/cryo-print.js', '/groups.js', '/well-groups.js', '/well-groups.css', '/assay-groups.js', '/manual-groups.js', '/manual-groups.css', '/app.js', '/style.css', '/selection.js', '/source-picker.js', '/source-picker.css', '/replate.js', '/replate.css', '/quick-medium.js', '/quick-medium.css', '/transfer.js', '/transfer-cards.js', '/occupied-targets.js', '/occupied-targets.css', '/archived-cultures.js', '/archived-cultures.css', '/lineage-links.js', '/relocation.js', '/relocation.css', '/autocomplete.js', '/medium.js', '/medium.css','/count.js','/count.css','/workday.js','/workday.css','/home.js','/home.css','/experiments.js','/experiments.css','/result-paste.js', '/word-editions.js', '/plate-today.js', '/cryo-storage.js', '/cryo-storage.css']:
                     file = ROOT / 'static' / ('index.html' if path == '/' else path[1:])
                     self.send(200, index if path in ('/','/index.html') else file.read_bytes(), STATIC_MIME[file.suffix] + '; charset=utf-8')
                 else:
@@ -314,7 +410,7 @@ def make_server(data_dir=DEFAULT_DATA, port=8875, *, mobile_port=8876):
                     return self.send(403, {'error':'请从此设备的工作台操作。'})
                 if self.path == '/pair':
                     return self.submit_pairing()
-                if self.path not in ('/api/command', '/api/snapshot'):
+                if self.path not in ('/api/command', '/api/snapshot', '/api/lab/word'):
                     return self.send(403, {'error':'请在电脑上管理工作台。'})
             elif origins and origins != ['http://' + self.headers['Host']]:
                 return self.send(403, {'error':'请求来源无效，请重新打开工作台。'})
@@ -327,7 +423,8 @@ def make_server(data_dir=DEFAULT_DATA, port=8875, *, mobile_port=8876):
                 if self.headers.get_content_type() != 'application/json':
                     return self.send(415, {'error':'需要 JSON 请求'})
                 size = int(self.headers.get('Content-Length', '0'))
-                if not 0 < size <= 1000000:
+                max_size = 14 * 1024 * 1024 if self.path == '/api/word-templates/import' else 1000000
+                if not 0 < size <= max_size:
                     raise ValueError('请求为空或过大')
                 data = json.loads(self.rfile.read(size))
                 if not isinstance(data, dict):
@@ -353,7 +450,46 @@ def make_server(data_dir=DEFAULT_DATA, port=8875, *, mobile_port=8876):
                     self.send(200,{'stopping':True})
                     self.server.shutdown()
                     return
+                if self.path=='/api/lab/word':
+                    with store.lock:
+                        rec=store.get_lab_record(data.get('record_id'),data.get('snapshot'))
+                        if rec['version']!=data.get('version') or rec['updated_at']!=data.get('record_updated_at'):raise Conflict('版本已变化，请重新打开记录')
+                        if word_config().get('confirm_before_export') and data.get('format_confirmed') is not True:raise ValueError('请先确认文档格式')
+                        tpl=word_templates.resolve_active_template(store.directory, data.get('template_id'))
+                        blob=make_word(rec,load_schema(),data.get('format'),template=tpl);ed=edition_meta(rec,blob)
+                        result={'edition':ed,'document':base64.b64encode(blob).decode('ascii'),'template_id':tpl['id'],'template_name':tpl['name']}
+                        if not data.get('snapshot'):
+                            result['state']=store.mutate('word_issue',{'edition':ed},data.get('revision'));result['undo']=store.undo_info()
+                        return self.send(200,result)
+                if self.path == '/api/word-templates/import':
+                    raw_b64 = data.get('content_base64')
+                    if not isinstance(raw_b64, str) or not raw_b64.strip():
+                        raise ValueError('请上传有效的 .docx 模板文件')
+                    try:
+                        blob = base64.b64decode(raw_b64, validate=True)
+                    except (ValueError, binascii.Error) as exc:
+                        raise ValueError('模板文件 Base64 编码无效') from exc
+                    if len(blob) > 10 * 1024 * 1024:
+                        raise ValueError('模板文件不能超过 10 MiB')
+                    with store.lock:
+                        entry = word_templates.import_template(
+                            store.directory,
+                            name=data.get('name', ''),
+                            filename=data.get('filename', 'template.docx'),
+                            content_bytes=blob,
+                            notes=data.get('notes', ''),
+                            set_as_default=bool(data.get('set_as_default', False)),
+                        )
+                        return self.send(200, {'template': entry, **word_templates.list_templates(store.directory)})
+                if self.path == '/api/word-templates/default':
+                    with store.lock:
+                        return self.send(200, word_templates.set_default_template(store.directory, data.get('template_id')))
+                if self.path == '/api/word-templates/delete':
+                    with store.lock:
+                        return self.send(200, word_templates.delete_template(store.directory, data.get('template_id')))
                 if self.path == '/api/command':
+                    if data.get('action') == 'word_issue':
+                        raise ValueError('请从 Word 导出入口生成文档')
                     state = store.mutate(data.get('action'), data.get('payload', {}), data.get('revision'),
                                          client_request_id=data.get('client_request_id'))
                     result={'state':state,'undo':store.undo_info(),'workday':store.workday(),
@@ -377,9 +513,27 @@ def make_server(data_dir=DEFAULT_DATA, port=8875, *, mobile_port=8876):
                         backup = store.backup()
                         result = store.compact_storage(keep_recent=10, vacuum=True)
                     self.send(200, {**result, 'backup':backup.name, 'last_backup':backup.name})
+                elif self.path == '/api/backup-dir':
+                    if data.get('reset') is True:
+                        info = store.set_backup_dir(None)
+                    else:
+                        if 'path' not in data:
+                            raise ValueError('请提供备份目录路径')
+                        info = store.set_backup_dir(data.get('path'))
+                    self.send(200, info)
+                elif self.path == '/api/backup-dir/open':
+                    target = open_local_directory(store.backup_dir())
+                    self.send(200, {'opened': str(target)})
+                elif self.path == '/api/backup-dir/pick':
+                    picked = pick_local_directory(store.backup_dir())
+                    if not picked:
+                        return self.send(200, {'cancelled': True})
+                    if data.get('apply') is True:
+                        return self.send(200, {'cancelled': False, 'path': picked, **store.set_backup_dir(picked)})
+                    self.send(200, {'cancelled': False, 'path': picked})
                 elif self.path == '/api/backup':
                     backup = store.backup()
-                    self.send(200, {'filename':backup.name,'url':'/api/backups/'+backup.name})
+                    self.send(200, {'filename':backup.name,'url':'/api/backups/'+backup.name,'backup_dir':str(backup.parent)})
                 else:
                     self.send(404, {'error':'操作不存在'})
             except Conflict as error:
