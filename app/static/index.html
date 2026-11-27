@@ -1,16 +1,16 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="manifest" href="/notebook.webmanifest"><link rel="apple-touch-icon" href="/notebook-256.png"><meta name="theme-color" content="#285b46"><meta name="author" content="LumyQAQ"><script src="/theme.js"></script><title>Lab Note · 细胞培养工作台</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/relocation.css"><link rel="stylesheet" href="/cryo-storage.css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Lab Note"><link rel="manifest" href="/notebook.webmanifest"><link rel="apple-touch-icon" href="/notebook-256.png"><meta name="theme-color" content="#285b46"><meta name="author" content="LumyQAQ"><script src="/theme.js"></script><title>Lab Note · 细胞培养工作台</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/relocation.css"><link rel="stylesheet" href="/cryo-storage.css"></head>
 <body>
 <aside class="sidebar">
   <a class="brand" href="/"><span class="brand-mark">c<span>·</span></span><span>LAB<br><strong>NOTE</strong></span></a>
   <div class="workspace-tag">个人实验室 / LOCAL</div>
-  <nav aria-label="主导航"><button data-view="home" class="nav active"><span>⌂</span> 首页</button><button data-view="work" class="nav"><span>✓</span> 今日工作</button><button data-view="today" class="nav"><span>◉</span> 当前培养</button><button data-view="labs" class="nav"><span>▤</span> 实验记录</button><button data-view="cryo" class="nav"><span>❄</span> 冻存库存</button><button data-view="drugs" class="nav"><span>◫</span> 药物配制 / 存储</button><button data-view="history" class="nav"><span>▦</span> 历史日记</button><button data-view="events" class="nav"><span>≡</span> 操作记录</button><button data-view="backup" class="nav"><span>↓</span> 数据与备份</button></nav>
-  <div class="sidebar-bottom"><span class="status-dot"></span> 仅保存在本机<br><small>Lab Note · 本机版</small></div>
+  <nav aria-label="主导航"><button data-view="home" class="nav active"><span>⌂</span> 首页</button><button data-view="work" class="nav"><span>✓</span> 今日工作</button><button data-view="today" class="nav"><span>◉</span> 当前培养</button><button data-view="labs" class="nav"><span>▤</span> 实验记录</button><button data-view="cryo" class="nav"><span>❄</span> 冻存库存</button><button data-view="drugs" class="nav"><span>◫</span> 药物配制 / 存储</button><button data-view="history" class="nav"><span>▦</span> 历史日记</button><button data-view="events" class="nav"><span>≡</span> 操作记录</button><button data-view="backup" data-host-only hidden class="nav"><span>↓</span> 数据与备份</button><a href="/devices" class="nav device-link" data-host-only hidden><span aria-hidden="true">⇄</span> 连接手机 / 平板</a></nav>
+  <div class="sidebar-bottom"><span class="status-dot"></span> <span id="storage-location">仅保存在本机</span><br><small id="workspace-client">Lab Note · 本机版</small></div>
 </aside>
 <main>
   <header class="topbar"><div><span class="eyebrow">LABORATORY NOTEBOOK</span><h1>Lab Note 实验笔记</h1><small class="product-credit">软件作者 <a rel="author noopener" href="https://github.com/LumyQAQ" target="_blank">LumyQAQ</a></small></div><div class="header-utilities"><button type="button" class="button secondary theme-toggle" id="theme-toggle" aria-label="深色模式" aria-pressed="false" title="切换到深色模式">🌙 深色</button><div class="today-date" id="today-date"></div><button type="button" class="button secondary" id="undo-last" disabled>↶ 撤销上一步</button></div></header>
-  <div id="connection" class="connection" hidden></div>
+  <div role="status" id="connection" class="connection" hidden></div>
   <div id="update-banner" class="update-banner" role="status" hidden></div>
   <div id="content" aria-live="polite"></div>
 </main>
@@ -68,5 +68,25 @@
 <script src="/archived-cultures.js"></script>
 <script src="/cryo-storage.js"></script>
 <link rel="stylesheet" href="/theme-dark.css">
+
+<nav class="mobile-tabbar" id="mobile-tabbar" aria-label="移动端主导航">
+  <button type="button" class="m-tab" data-mobile-view="home"><span aria-hidden="true">⌂</span>首页</button>
+  <button type="button" class="m-tab" data-mobile-view="work"><span aria-hidden="true">✓</span>今日</button>
+  <button type="button" class="m-tab" data-mobile-view="today"><span aria-hidden="true">◉</span>培养</button>
+  <button type="button" class="m-tab" data-mobile-view="cryo"><span aria-hidden="true">❄</span>冻存</button>
+  <button type="button" class="m-tab" id="mobile-more-btn" aria-controls="mobile-more-sheet" aria-expanded="false"><span aria-hidden="true">⋯</span>更多</button>
+</nav>
+<div class="mobile-more-backdrop" id="mobile-more-backdrop" hidden></div>
+<div class="mobile-more-sheet" id="mobile-more-sheet" role="dialog" aria-label="更多功能" hidden>
+  <div class="mobile-more-head"><strong>更多功能</strong><button type="button" class="icon-button" id="mobile-more-close" aria-label="关闭更多功能">×</button></div>
+  <div class="mobile-more-grid">
+    <button type="button" class="m-sheet-item" data-mobile-view="labs">实验记录</button>
+    <button type="button" class="m-sheet-item" data-mobile-view="drugs">药物配制</button>
+    <button type="button" class="m-sheet-item" data-mobile-view="history">历史日记</button>
+    <button type="button" class="m-sheet-item" data-mobile-view="events">操作记录</button>
+    <button type="button" class="m-sheet-item" data-mobile-view="backup" data-host-only hidden>数据与备份</button>
+    <a class="m-sheet-item" href="/devices" data-host-only hidden>连接手机 / 平板</a>
+  </div>
+</div>
 <script src="/app.js"></script>
 </body></html>

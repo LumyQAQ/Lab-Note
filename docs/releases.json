@@ -1,5 +1,25 @@
 [
   {
+    "version": "1.5.2",
+    "date": "2026-11-27",
+    "title": "跨设备配对共享、移动端主屏幕与深色孔位",
+    "highlights": [
+      "电脑端新增设备控制中心，可选择局域网或 Tailscale 地址启用 HTTPS 共享、配对和撤销设备，并可选择重启后恢复共享。",
+      "手机和平板可添加到主屏幕，以独立窗口打开同一份记录。窄屏支持五键底栏、更多抽屉和断网重连提示。",
+      "修复关闭的移动抽屉和遮罩拦截点击，以及深色模式下整组/单孔按钮、8 组培养孔与不同内容类型孔位的配色。"
+    ],
+    "mac": {
+      "tag": "v1.5.2",
+      "release_url": "https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.5.2",
+      "download_url": "https://github.com/LumyQAQ/Lab-Note/releases/download/v1.5.2/lab-note-v1.5.2.zip"
+    },
+    "win": {
+      "tag": "v1.5.2-preview.1",
+      "release_url": "https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.5.2-preview.1",
+      "download_url": "https://github.com/LumyQAQ/Lab-Note/releases/download/v1.5.2-preview.1/Lab-Note-1.5.2-preview.1-Windows-x64.zip"
+    }
+  },
+  {
     "version": "1.5.1",
     "date": "2026-11-27",
     "title": "深色模式修复与每日核对状态配色",

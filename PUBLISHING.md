@@ -27,3 +27,5 @@ Windows 与 macOS 共用主分支的应用源码。Windows 预览包由 `packagi
 3. 更新 `docs/index.html` 中两个平台的静态版本号和下载入口，并核对 `docs/verification.html` 的版本、文件名、签名和验签命令。保留此前各代的记录和下载链接。
 4. 本地启动 HTTP 服务，打开 `/#changelog`，验证最新一代的说明和两个平台的下载，再展开早期版本。分别在 GitHub Releases API 正常及请求被阻断时刷新，核对在线合并和静态归档均能显示。
 5. 推送至 `main` 后等待 GitHub Pages 部署成功，到正式安装页复核版本时间线、下载和验签入口。[线上版本演进](https://lumyqaq.github.io/Lab-Note/#changelog)
+
+Windows 共享或证书代码变更时，先在待发布提交的验证分支运行 Windows 工作流，勾选 `source_preflight`。它会构建临时预览包并用随包 Python 验证 Windows 网卡发现、HTTPS 证书和启动入口。发布后再使用默认选项校验 GitHub 上的实际 ZIP。

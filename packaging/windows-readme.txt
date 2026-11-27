@@ -1,5 +1,5 @@
 Lab Note · 实验笔记
-Windows x64 本地预览版 1.5.1-preview.1
+Windows x64 本地预览版 1.5.2-preview.1
 软件作者：LumyQAQ    https://github.com/LumyQAQ
 本包仅供本地试用。GitHub v1.0.0 为之前发布的版本。
 
@@ -34,3 +34,5 @@ Windows x64 本地预览版 1.5.1-preview.1
 
 Windows 现场自检
 双击 Check-Lab-Note.cmd。它使用新的临时目录，验证北京时间、启动、端口复用、空白数据库、备份完整性和停止；完成后清理临时数据。
+
+手机与平板：在电脑工作台打开「设备」，选择本机局域网或 Tailscale 地址并开启共享，然后按页面提示配对。关闭共享后可继续在电脑本机使用。

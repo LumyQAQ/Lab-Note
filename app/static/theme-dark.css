@@ -397,3 +397,46 @@
   border-color: #5ca680;
   color: #e6faee;
 }
+:root[data-theme="dark"] .well-selection-switch {
+  background: #141c19;
+  border-color: var(--line);
+}
+:root[data-theme="dark"] .well-selection-switch button { color: var(--secondary); }
+:root[data-theme="dark"] .well-selection-switch button.active {
+  background: #2d7354;
+  color: #fff;
+  font-weight: 600;
+}
+/* Well Group 8-Tone Dark Palette & Assay/Medium/PBS Well Content Types */
+:root[data-theme="dark"] [data-well-group-color="0"] { --wg-bg: #1b3627; --wg-accent: #5cb882; --wg-fg: #dcf5e6; }
+:root[data-theme="dark"] [data-well-group-color="1"] { --wg-bg: #183040; --wg-accent: #5ba4d0; --wg-fg: #d6eefc; }
+:root[data-theme="dark"] [data-well-group-color="2"] { --wg-bg: #362916; --wg-accent: #d49b46; --wg-fg: #fce5be; }
+:root[data-theme="dark"] [data-well-group-color="3"] { --wg-bg: #2b213d; --wg-accent: #a27ed4; --wg-fg: #e8dafc; }
+:root[data-theme="dark"] [data-well-group-color="4"] { --wg-bg: #382120; --wg-accent: #d4796e; --wg-fg: #fbdad5; }
+:root[data-theme="dark"] [data-well-group-color="5"] { --wg-bg: #163330; --wg-accent: #4fb8aa; --wg-fg: #cff5ef; }
+:root[data-theme="dark"] [data-well-group-color="6"] { --wg-bg: #2a3118; --wg-accent: #9db052; --wg-fg: #e9f2ca; }
+:root[data-theme="dark"] [data-well-group-color="7"] { --wg-bg: #1f2740; --wg-accent: #748cd4; --wg-fg: #dae3fc; }
+/* Explicit plate contents, then culture groups, then the existing fill palette. */
+:root[data-theme="dark"] .plate-grid .well[data-well-palette="0"] { --fill-bg: #203b2b; --fill-edge: #5c966e; --fill-fg: #d8f0df; }
+:root[data-theme="dark"] .plate-grid .well[data-well-palette="1"] { --fill-bg: #1e3440; --fill-edge: #6296ab; --fill-fg: #d4e9f1; }
+:root[data-theme="dark"] .plate-grid .well[data-well-palette="2"] { --fill-bg: #3a2f1c; --fill-edge: #ad8b4e; --fill-fg: #f6e9cd; }
+:root[data-theme="dark"] .plate-grid .well[data-well-palette="3"] { --fill-bg: #35283b; --fill-edge: #a083ae; --fill-fg: #ecdfef; }
+:root[data-theme="dark"] .plate-grid .well:is([data-well-group-color], [data-well-content], [data-well-palette]):not(.selected, .drop-conflict, .drop-preview) {
+  background: var(--content-bg, var(--wg-bg, var(--fill-bg)));
+  border-color: var(--content-edge, var(--wg-accent, var(--fill-edge)));
+  color: var(--content-fg, var(--wg-fg, var(--fill-fg)));
+}
+:root[data-theme="dark"] .plate-grid .well[data-well-group-color]:not(.selected, .drop-conflict, .drop-preview) {
+  box-shadow: inset 0 0 0 1px var(--wg-accent);
+}
+:root[data-theme="dark"] .plate-grid .well:is([data-well-group-color], [data-well-content], [data-well-palette]) small { color: inherit; }
+:root[data-theme="dark"] [data-well-content="target_medium"] { --content-bg: #192b3f; --content-edge: #5a94c7; --content-fg: #cbe4fc; }
+:root[data-theme="dark"] [data-well-content="target_effector"] { --content-bg: #29203d; --content-edge: #9d7dc9; --content-fg: #e5d6fa; }
+:root[data-theme="dark"] [data-well-content="medium"] { --content-bg: #362b14; --content-edge: #cca246; --content-fg: #fae4b0; }
+:root[data-theme="dark"] [data-well-content="pbs"] { --content-bg: #16332f; --content-edge: #4eb3a3; --content-fg: #c9f2eb; }
+:root[data-theme="dark"] .mobile-tabbar { background: rgba(19, 27, 23, 0.94); border-top-color: var(--line); }
+:root[data-theme="dark"] .m-tab { color: var(--muted); }
+:root[data-theme="dark"] .m-tab.active { background: #21372c; color: #9de0bd; }
+:root[data-theme="dark"] .mobile-more-sheet { background: var(--surface); border-color: var(--line); box-shadow: 0 20px 52px rgba(0, 0, 0, 0.65); }
+:root[data-theme="dark"] .m-sheet-item { background: #151e1a; border-color: var(--line); color: var(--ink); }
+:root[data-theme="dark"] .m-sheet-item.active { background: #21372c; border-color: #4f9473; color: #9de0bd; }

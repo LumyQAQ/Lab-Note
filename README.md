@@ -11,12 +11,12 @@
 
 | 系统 | 下载 | 启动 |
 | --- | --- | --- |
-| Windows 10 / 11 x64 | [1.5.1-preview.1 预览版 ZIP](https://github.com/LumyQAQ/Lab-Note/releases/download/v1.5.1-preview.1/Lab-Note-1.5.1-preview.1-Windows-x64.zip) | 全部解压后双击 `Start-Lab-Note.cmd`，已附 Python |
-| macOS | [1.5.1 正式版 ZIP](docs/downloads/lab-note-v1.5.1.zip) | 安装 Python 3.9+，双击「启动实验日记.command」 |
+| Windows 10 / 11 x64 | [1.5.2-preview.1 预览版 ZIP](https://github.com/LumyQAQ/Lab-Note/releases/download/v1.5.2-preview.1/Lab-Note-1.5.2-preview.1-Windows-x64.zip) | 全部解压后双击 `Start-Lab-Note.cmd`，已附 Python |
+| macOS | [1.5.2 正式版 ZIP](docs/downloads/lab-note-v1.5.2.zip) | 安装 Python 3.9+，双击「启动实验日记.command」 |
 
 ## 本次更新
 
-修复深色模式下半换液弹窗底部的白条，并调整编辑器、孔板、来源选择器与冻存提示的底色和文字。首页用暖琥珀金标示「今日待核对」、深青蓝标示「今日已核对」、森林绿标示「在培养」，卡片边框同步提示核对状态。
+电脑端可选择通过局域网或 Tailscale 与手机、平板配对。移动端新增主屏幕应用、五键底栏、更多菜单和断网提示，深色模式改善孔位与整组/单孔切换的对比度。
 
 ## Windows 本机预览版
 
@@ -32,7 +32,7 @@
 
 默认优先使用 8875，端口冲突时自动改用空闲端口。要切换运行中服务的端口，先执行 `Stop-Lab-Note.cmd`。记录和日志位于 `%LOCALAPPDATA%\Lab Note`。可双击 `Check-Lab-Note.cmd` 用临时库自检。
 
-主分支包含两平台的共用源码。Windows 预览版附件见 [v1.5.1-preview.1](https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.5.1-preview.1)。
+主分支包含两平台的共用源码。Windows 预览版附件见 [v1.5.2-preview.1](https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.5.2-preview.1)。
 <!-- repository-only:end -->
 
 [软件署名及发布校验](AUTHORS.md)
@@ -50,7 +50,14 @@
 
 3. 启动器会打开浏览器并显示实际使用的本机地址。首次打开是空白记录，点击「当前培养 → 新增容器」开始填写。
 
-分享版默认把数据保存在 `~/Library/Application Support/Culture Notes Share/`。服务仅监听本机地址 127.0.0.1，优先使用 8875，端口被占用时会自动选择空闲端口，可以与使用 8765 的桌面版本分别运行。
+分享版默认把数据保存在 `~/Library/Application Support/Culture Notes Share/`。默认仅监听本机地址 127.0.0.1，优先使用 8875，端口被占用时会自动选择空闲端口，可以与使用 8765 的桌面版本分别运行。
+
+## 手机与平板访问
+
+1. 在电脑上启动工作台，打开「设备」控制中心，选择本机局域网地址或已连接的 Tailscale 地址。跨网访问时，两端需要加入同一个可互访的 Tailscale 网络。
+2. 开启 HTTPS 共享后，按控制中心说明将本工作台的公开 CA 证书传到自己的移动设备并信任。在手机或平板上打开页面给出的 HTTPS 地址，用配对码登记设备。
+3. 已配对设备可以查看和编辑电脑上的同一份记录。可在移动浏览器中添加到主屏幕，使用底部导航。断网时需要重新连接电脑才能读取或保存记录。
+4. 可在电脑端撤销某台设备或停止共享。希望电脑重启并再次打开工作台后自动恢复共享时，在控制中心开启自动恢复。每份工作台单独生成证书与配对凭据。
 
 ## 可以记录什么
 
@@ -85,6 +92,6 @@ python3 -m unittest discover -s tests -v
 
 ## 备份与恢复
 
-从旧版升级前，可在旧版的「数据与备份」下载 ZIP 并留存。1.5.1 可以读取旧库。写入压缩历史后，恢复到 1.4.0 需要使用升级前备份。
+从旧版升级前，可在旧版的「数据与备份」下载 ZIP 并留存。1.5.2 可以读取旧库。写入压缩历史后，恢复到 1.4.0 需要使用升级前备份。
 
 在「数据与备份」下载 ZIP。解压后，可在解压目录运行 `shasum -a 256 -c original-file.sha256` 核对数据库。将 `culture.sqlite3` 放到单独的恢复目录，用 `python3 app/server.py --data-dir "恢复目录" --port 8890` 打开核验。

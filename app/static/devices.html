@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>连接手机 / 平板 · Lab Note</title>
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/devices.css">
+</head>
+<body>
+<main>
+  <a href="/" class="back">← 返回 Lab Note</a>
+  <header>
+    <h1>连接手机 / 平板</h1>
+    <p>让手机或平板访问这台电脑上的 Lab Note。两台设备可以连接同一局域网，也可以通过 Tailscale 跨网连接。</p>
+  </header>
+  <p role="alert" id="error" hidden></p>
+
+  <section class="ts-card" id="ts-card">
+    <div class="heading">
+      <h2>Tailscale 跨网连接</h2>
+      <span id="ts-badge" class="badge">检测中…</span>
+    </div>
+    <p id="ts-desc" class="sub"></p>
+    <details id="ts-guide">
+      <summary>配置 Tailscale</summary>
+      <ol>
+        <li><strong>在电脑上安装 Tailscale</strong>：打开 <a href="https://tailscale.com/download" target="_blank" rel="noopener">tailscale.com/download</a>，选取 macOS 或 Windows 版本，安装后登录。</li>
+        <li><strong>在手机 / 平板上安装 Tailscale</strong>：在 iPhone / iPad App Store 或安卓应用市场安装 Tailscale，登录<strong>同一个账号</strong>并打开开关。</li>
+        <li><strong>回到本页点「刷新地址」</strong>：下方下拉框会自动出现 <code>100.x.y.z · Tailscale 跨网直连</code>，选中它并开启共享，扫码配对后即可通过此网络访问电脑上的记录。</li>
+      </ol>
+    </details>
+  </section>
+
+  <section>
+    <div class="heading">
+      <h2>跨设备共享入口</h2>
+      <span id="status" role="status">正在读取…</span>
+    </div>
+    <div id="off" hidden>
+      <label for="address">选择同步网络地址（有 Tailscale 时会排在最前）</label>
+      <select id="address"></select>
+      <p id="no-network" hidden>未检测到可用的 Tailscale 或局域网地址，请连接 Wi-Fi 或开启 Tailscale 后刷新。</p>
+      <label class="inline-toggle"><input type="checkbox" id="autostart-off" checked>服务重启后自动恢复此地址共享</label>
+      <div class="actions">
+        <button id="start">开启多端共享</button>
+        <button id="refresh" class="secondary">刷新地址</button>
+      </div>
+    </div>
+    <div id="on" hidden>
+      <div class="pairing">
+        <canvas id="qr" width="185" height="185" aria-label="移动工作台地址二维码"></canvas>
+        <div>
+          <p class="label">手机或平板的访问地址</p>
+          <p id="url"></p>
+          <button class="text" id="copy">复制地址</button>
+          <p class="label">一次性配对码</p>
+          <output id="code"></output>
+          <p id="expiry" class="sub"></p>
+          <button class="secondary" id="renew">生成新配对码</button>
+        </div>
+      </div>
+      <p id="network-changed" hidden>电脑的网络地址已变化。请关闭共享，再选择当前地址开启。</p>
+      <label class="inline-toggle"><input type="checkbox" id="autostart-on">服务重启后自动恢复此地址共享</label>
+      <div class="actions">
+        <button class="text" id="stop">关闭共享</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="trust" hidden>
+    <h2>首次连接与添加到主屏幕</h2>
+    <p>1. 将下方公用证书发送到自己的手机或平板，核对此页的 SHA-256 指纹后安装并信任。<br>2. 用浏览器（iPhone / iPad 用 <strong>Safari</strong>，安卓用 <strong>Chrome / Edge</strong>）打开上方地址并输入 8 位配对码。<br>3. 配对成功后，可将 Lab Note 添加到主屏幕。</p>
+    <div class="actions">
+      <a class="download" href="/devices/ca.cer" download="Lab-Note-CA.cer">下载工作台证书 (.cer)</a>
+    </div>
+    <details>
+      <summary>iPhone / iPad 与安卓详细步骤</summary>
+      <p><strong>iPhone / iPad 证书信任</strong>：收到证书后进入「设置 → 已下载描述文件」点击安装，再前往「设置 → 通用 → 关于本机 → 证书信任设置」，开启对应 Lab Note 证书的完全信任。</p>
+      <p><strong>iPhone / iPad 添加为桌面 App</strong>：在 Safari 打开并完成配对后，点底部「分享」图标 → 选择「添加到主屏幕」，桌面即出现 <strong>Lab Note</strong> 独立图标。</p>
+      <p><strong>安卓</strong>：在系统设置搜索「安装 CA 证书」选择收到的文件；在 Chrome/Edge 完成配对后，点右上角菜单选择「安装应用 / 添加到主屏幕」。</p>
+      <p class="sub">本工作台公用证书 SHA-256 指纹</p>
+      <code id="fingerprint"></code>
+    </details>
+  </section>
+
+  <section>
+    <div class="heading"><h2>已配对设备</h2><span id="count"></span></div>
+    <div id="devices"></div>
+  </section>
+
+  <p class="sub">共享期间，已配对的设备可以查看和编辑电脑上的同一份记录。关闭共享会停止移动端访问。</p>
+</main>
+<script src="/devices/qr.js"></script>
+<script src="/devices.js"></script>
+</body>
+</html>

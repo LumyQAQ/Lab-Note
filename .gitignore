@@ -135,3 +135,17 @@
 !/docs/downloads/lab-note-v1.5.1.zip.sig
 !/tests/test_dark_mode_browser.cjs
 !/docs/releases.json
+!/app/static/vendor/
+!/app/mobile_access.py
+!/app/mobile_tls.py
+!/app/static/devices.html
+!/app/static/devices.js
+!/app/static/devices.css
+!/app/static/pair.html
+!/app/static/vendor/qrcodegen.js
+!/app/static/sw.js
+!/docs/downloads/lab-note-v1.5.2.zip
+!/docs/downloads/lab-note-v1.5.2.zip.sig
+!/tests/test_mobile_access.py
+!/tests/test_mobile_tls.py
+!/tests/test_mobile_ui.cjs

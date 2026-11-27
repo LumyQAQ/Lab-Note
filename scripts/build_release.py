@@ -29,6 +29,14 @@ app/occupied_targets.py
 app/relocation.py
 app/replate.py
 app/server.py
+app/mobile_access.py
+app/mobile_tls.py
+app/static/devices.html
+app/static/devices.js
+app/static/devices.css
+app/static/pair.html
+app/static/vendor/qrcodegen.js
+app/static/sw.js
 app/static/app.js
 app/static/archived-cultures.css
 app/static/archived-cultures.js
@@ -87,7 +95,7 @@ tests/test_public_app.py
 
 
 def main():
-    target = ROOT / 'docs/downloads/lab-note-v1.5.1.zip'
+    target = ROOT / 'docs/downloads/lab-note-v1.5.2.zip'
     target.parent.mkdir(parents=True, exist_ok=True)
     pending = target.with_suffix('.tmp')
     with zipfile.ZipFile(pending, 'w', compression=zipfile.ZIP_DEFLATED) as archive:

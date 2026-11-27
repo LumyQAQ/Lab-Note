@@ -1,5 +1,11 @@
 name: Verify Windows preview download
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      source_preflight:
+        description: Build and test this ref before publishing
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -7,21 +13,41 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 7
     steps:
+      - uses: actions/checkout@v4
+        if: inputs.source_preflight
+        with:
+          persist-credentials: false
+      - name: Build Windows archive from the selected ref
+        if: inputs.source_preflight
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runtime = Join-Path $env:RUNNER_TEMP 'python-embed.zip'
+          Invoke-WebRequest 'https://www.python.org/ftp/python/3.14.10/python-3.14.10-embed-amd64.zip' -OutFile $runtime
+          python packaging/build_windows_local.py $runtime $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw 'Windows package build failed' }
       - name: Verify the published x64 ZIP and exercise its real CMD entry points
         shell: pwsh
         env:
-          ASSET: Lab-Note-1.5.1-preview.1-Windows-x64.zip
-          VERSION: v1.5.1-preview.1
-          EXPECTED_SHA256: e0433d885ac044ff857b226174c657a3711835e4c5fb32406377304a96d223e1
+          PREFLIGHT: ${{ inputs.source_preflight }}
+          ASSET: Lab-Note-1.5.2-preview.1-Windows-x64.zip
+          VERSION: v1.5.2-preview.1
+          EXPECTED_SHA256: 624b74fa806a9555332ce8ca315281384461f6670217ce2493fc391bd757d92b
         run: |
           $ErrorActionPreference = 'Stop'
           $assetUrl = "https://github.com/LumyQAQ/Lab-Note/releases/download/$env:VERSION/$env:ASSET"
           $zip = Join-Path $env:RUNNER_TEMP $env:ASSET
-          Invoke-WebRequest -Uri $assetUrl -OutFile $zip
-          if ((Get-FileHash -Algorithm SHA256 $zip).Hash -ne $env:EXPECTED_SHA256) { throw 'Release checksum mismatch' }
+          if ($env:PREFLIGHT -ne 'true') {
+            Invoke-WebRequest -Uri $assetUrl -OutFile $zip
+            if ((Get-FileHash -Algorithm SHA256 $zip).Hash -ne $env:EXPECTED_SHA256) { throw 'Release checksum mismatch' }
+          }
           $dir = Join-Path $env:RUNNER_TEMP 'Lab Note 测试'
           Expand-Archive -LiteralPath $zip -DestinationPath $dir
           Set-Location (Join-Path $dir 'Lab-Note')
+          & .\runtime\python.exe -X utf8 -B tests/test_mobile_tls.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows TLS test failed' }
+          & .\runtime\python.exe -X utf8 -B tests/test_mobile_access.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Windows network and pairing checks failed' }
           & .\Start-Lab-Note.cmd -h
           if ($LASTEXITCODE -ne 0) { throw 'Windows CLI help failed' }
           $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 8875)

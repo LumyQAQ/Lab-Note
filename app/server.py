@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Personal notebook served on the loopback interface."""
+"""Desktop loopback notebook with optional paired HTTPS access."""
 import argparse
 import csv
 import errno
 import hashlib
+import hmac
 import re
 import html
 import io
 import json
-import mimetypes
 import os
 import secrets
 import socket
@@ -33,8 +33,12 @@ from lab_records import load_schema
 from lab_exports import record_html, SOFTWARE_CREDIT
 from group_units import member_active
 from platform_config import default_data_dir, port_value
+from mobile_access import COOKIE, DEVICE_LIFETIME, MobileAccess, MobileListener
 
 DEFAULT_DATA = default_data_dir()
+STATIC_MIME = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css'}
+DEVICE_FILES = {'/devices': 'devices.html', '/devices.js': 'devices.js',
+                '/devices.css': 'devices.css', '/devices/qr.js': 'vendor/qrcodegen.js'}
 
 
 def export_rows(state, record_date):
@@ -69,9 +73,10 @@ class PortUnavailable(OSError):
     """The loopback listener could not bind the requested port."""
 
 
-def make_server(data_dir=DEFAULT_DATA, port=8875):
+def make_server(data_dir=DEFAULT_DATA, port=8875, *, mobile_port=8876):
     store = Store(data_dir)
     token = secrets.token_urlsafe(32)
+    sharing = MobileAccess(store.directory, mobile_port)
 
     # ZIP timestamps are deterministic; hash asset bytes so different builds get different URLs.
     static_root = ROOT / 'static'
@@ -85,7 +90,7 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
         def log_message(self, *args):
             pass
 
-        def send(self, status, body, mime='application/json; charset=utf-8', filename=None):
+        def send(self, status, body, mime='application/json; charset=utf-8', filename=None, headers=None):
             if not isinstance(body, bytes):
                 body = json.dumps(body, ensure_ascii=False).encode() if mime.startswith('application/json') else body.encode()
             self.send_response(status)
@@ -96,14 +101,53 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
             self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
             self.send_header('Referrer-Policy','same-origin')
             self.send_header('Cross-Origin-Resource-Policy','same-origin')
+            for key, value in (headers or {}).items():
+                self.send_header(key, value)
             if filename:
                 self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
             self.end_headers()
             self.wfile.write(body)
 
+        @property
+        def mobile(self):
+            return isinstance(self.server, MobileListener)
+
         def valid_host(self):
+            hosts = self.headers.get_all('Host', [])
+            if len(hosts) != 1:
+                return False
+            if self.mobile:
+                return 'https://' + hosts[0] == self.server.origin
             port = self.server.server_port
-            return self.headers.get('Host','') in (f'127.0.0.1:{port}',f'localhost:{port}')
+            return hosts[0] in (f'127.0.0.1:{port}',f'localhost:{port}')
+
+        def request_token(self):
+            if not self.mobile:
+                return token
+            device = sharing.credential(self.server, self.headers.get('Cookie'))
+            if device:
+                return hmac.new(token.encode(), device.encode(), 'sha256').hexdigest()
+
+        def pair_page(self, error='', status=200):
+            page = (static_root / 'pair.html').read_text(encoding='utf-8')
+            message = f'<p role="alert"><strong>{html.escape(error)}</strong></p>' if error else ''
+            return self.send(status, page.replace('<!--error-->', message), 'text/html; charset=utf-8')
+
+        def submit_pairing(self):
+            try:
+                if self.headers.get_content_type() != 'application/x-www-form-urlencoded':
+                    raise ValueError('配对表单格式无效。')
+                size = int(self.headers.get('Content-Length', 0))
+                if not 0 < size <= 2048:
+                    raise ValueError('配对表单长度无效。')
+                form = parse_qs(self.rfile.read(size).decode(), max_num_fields=3)
+                secret = sharing.pair(self.server, form.get('code', [''])[0], form.get('name', [''])[0])
+            except ValueError as error:
+                return self.pair_page(str(error), 400)
+            except OSError:
+                return self.pair_page('配对凭据未能保存，请检查电脑存储后重试。', 500)
+            cookie = f'{COOKIE}={secret}; Path=/; Max-Age={DEVICE_LIFETIME}; HttpOnly; Secure; SameSite=Strict'
+            return self.send(303, b'', 'text/plain', headers={'Location': '/', 'Set-Cookie': cookie})
 
         def do_GET(self):
             if not self.valid_host():
@@ -111,9 +155,30 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
             parsed = urlparse(self.path)
             path = parsed.path
             try:
+                if path == '/sw.js':
+                    return self.send(200, (static_root / 'sw.js').read_bytes(), 'text/javascript; charset=utf-8',
+                                     headers={'Service-Worker-Allowed': '/'})
                 if path in ('/notebook.webmanifest','/notebook-256.png','/notebook-512.png'):
                     mime='application/manifest+json' if path.endswith('.webmanifest') else 'image/png'
                     return self.send(200,(ROOT/'static'/path[1:]).read_bytes(),mime)
+                csrf = self.request_token()
+                if not csrf:
+                    if path in ('/', '/index.html', '/pair'):
+                        return self.pair_page()
+                    return self.send(401, {'error': '请在此设备的工作台首页重新配对。'})
+                if self.mobile and (path.startswith(('/devices', '/api/backups/')) or path in
+                                    ('/api/sharing', '/api/health', '/api/version', '/api/update-check', '/api/storage-stats')):
+                    return self.send(403, {'error': '请在电脑上管理工作台。'})
+                if path == '/api/sharing':
+                    return self.send(200, {**sharing.status(), 'token': token})
+                if path == '/devices/ca.cer':
+                    cert = sharing.certificate()
+                    if cert:
+                        return self.send(200, cert, 'application/x-x509-ca-cert', 'Lab-Note-CA.cer')
+                    return self.send(404, {'error': '开启共享后即可下载证书。'})
+                if path in DEVICE_FILES:
+                    file = static_root / DEVICE_FILES[path]
+                    return self.send(200, file.read_bytes(), STATIC_MIME[file.suffix] + '; charset=utf-8')
                 if path == '/api/health':
                     return self.send(200,{'app':'lab-culture-v1','data_dir':str(store.directory),'install_dir':str(ROOT.parent),'pid':os.getpid()})
                 if path == '/api/version':
@@ -135,10 +200,13 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
                                      'cryo-box.html' if query.get('download')==['1'] else None)
                 if path == '/api/state':
                     from update_check import configured_download_url, configured_repo, read_app_version
-                    backups = sorted(store.directory.joinpath('backups').glob('*.sqlite3'), reverse=True)
-                    self.send(200, {'app':'lab-culture-v1', 'state':store.state(), 'token':token,
-                                    'app_version':read_app_version(), 'github_repo':configured_repo(),
-                                    'download_url':configured_download_url(),
+                    desktop = {}
+                    if not self.mobile:
+                        backups = sorted(store.directory.joinpath('backups').glob('*.sqlite3'), reverse=True)
+                        desktop = {'github_repo': configured_repo(), 'download_url': configured_download_url(),
+                                   'data_dir': str(store.directory), 'last_backup': backups[0].name if backups else None}
+                    self.send(200, {'app':'lab-culture-v1', 'state':store.state(), 'token':csrf,
+                                    'app_version':read_app_version(), 'mobile_client':self.mobile,
                                     'today':current_time().date().isoformat(), 'types':TYPES, 'layouts':LAYOUTS,
                                     'cell_names':store.cell_names(),
                                     'treatments':store.treatments(),
@@ -146,8 +214,7 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
                                     'medium_recipes':store.medium_recipes(),
                                     'count_history':store.count_history(),
                                     'undo':store.undo_info(),'workday':store.workday(),
-                                    'lab_schema':load_schema(),
-                                    'data_dir':str(store.directory), 'last_backup':backups[0].name if backups else None})
+                                    'lab_schema':load_schema(), **desktop})
                 elif path == '/api/command-status':
                     request_id = parse_qs(parsed.query).get('request_id', [''])[0]
                     self.send(200, store.command_status(request_id))
@@ -230,7 +297,7 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
                     self.send(200, buffer.getvalue(), 'application/zip', name.replace('.sqlite3','.zip'))
                 elif path in ['/', '/index.html', '/theme.js', '/theme-dark.css', '/cryo-print.js', '/groups.js', '/well-groups.js', '/well-groups.css', '/assay-groups.js', '/manual-groups.js', '/manual-groups.css', '/app.js', '/style.css', '/selection.js', '/source-picker.js', '/source-picker.css', '/replate.js', '/replate.css', '/quick-medium.js', '/quick-medium.css', '/transfer.js', '/transfer-cards.js', '/occupied-targets.js', '/occupied-targets.css', '/archived-cultures.js', '/archived-cultures.css', '/lineage-links.js', '/relocation.js', '/relocation.css', '/autocomplete.js', '/medium.js', '/medium.css','/count.js','/count.css','/workday.js','/workday.css','/home.js','/home.css','/experiments.js','/experiments.css','/result-paste.js', '/cryo-storage.js', '/cryo-storage.css']:
                     file = ROOT / 'static' / ('index.html' if path == '/' else path[1:])
-                    self.send(200, index if path in ('/','/index.html') else file.read_bytes(), (mimetypes.guess_type(file)[0] or 'text/plain') + '; charset=utf-8')
+                    self.send(200, index if path in ('/','/index.html') else file.read_bytes(), STATIC_MIME[file.suffix] + '; charset=utf-8')
                 else:
                     self.send(404, {'error':'页面不存在'})
             except ValueError as error:
@@ -241,9 +308,20 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
 
         def do_POST(self):
             if not self.valid_host():return self.send(403,{'error':'工作台地址无效'})
-            origin = self.headers.get('Origin')
-            if ((origin and origin!='http://'+self.headers['Host'])
-                    or not secrets.compare_digest(self.headers.get('X-Lab-Token','').encode(),token.encode())):
+            origins = self.headers.get_all('Origin', [])
+            if self.mobile:
+                if origins != [self.server.origin]:
+                    return self.send(403, {'error':'请从此设备的工作台操作。'})
+                if self.path == '/pair':
+                    return self.submit_pairing()
+                if self.path not in ('/api/command', '/api/snapshot'):
+                    return self.send(403, {'error':'请在电脑上管理工作台。'})
+            elif origins and origins != ['http://' + self.headers['Host']]:
+                return self.send(403, {'error':'请求来源无效，请重新打开工作台。'})
+            csrf = self.request_token()
+            if not csrf:
+                return self.send(401, {'error':'设备授权已失效，请重新配对。'})
+            if not secrets.compare_digest(self.headers.get('X-Lab-Token','').encode(),csrf.encode()):
                 return self.send(403, {'error':'请求来源无效，请重新打开工作台。'})
             try:
                 if self.headers.get_content_type() != 'application/json':
@@ -254,6 +332,23 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
                 data = json.loads(self.rfile.read(size))
                 if not isinstance(data, dict):
                     raise ValueError('无效请求')
+                if self.path == '/api/sharing':
+                    action = data.get('action')
+                    if action == 'start':
+                        sharing.start(data.get('address'), Handler, auto_start=data.get('auto_start'))
+                    elif action == 'stop':
+                        sharing.stop()
+                    elif action == 'code':
+                        sharing.new_code()
+                    elif action == 'revoke':
+                        sharing.revoke(data.get('device_id'))
+                    elif action == 'autostart':
+                        if not isinstance(data.get('enabled'), bool):
+                            raise ValueError('请选择是否自动恢复共享。')
+                        sharing.set_autostart(data['enabled'])
+                    else:
+                        raise ValueError('未知设备管理操作')
+                    return self.send(200, {**sharing.status(), 'token':token})
                 if self.path == '/api/stop':
                     self.send(200,{'stopping':True})
                     self.server.shutdown()
@@ -299,6 +394,12 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
         request_queue_size = 64
         allow_reuse_address = os.name != 'nt'
 
+        def server_close(self):
+            try:
+                sharing.shutdown()
+            finally:
+                super().server_close()
+
         def server_bind(self):
             if os.name=='nt':
                 self.socket.setsockopt(socket.SOL_SOCKET,socket.SO_EXCLUSIVEADDRUSE,1)
@@ -311,6 +412,7 @@ def make_server(data_dir=DEFAULT_DATA, port=8875):
 
     server = LocalListener(('127.0.0.1', port), Handler)
     server.store = store
+    sharing.resume_autostart(Handler)
     return server
 
 

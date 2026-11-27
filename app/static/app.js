@@ -100,6 +100,12 @@ async function load() {
 }
 function applyBoot(result) {
   boot = result; state = boot.state;
+  document.querySelectorAll('[data-host-only]').forEach(item => { item.hidden = !!boot.mobile_client; });
+  if (boot.mobile_client) {
+    $('.workspace-tag').textContent = '个人实验室 / 已配对';
+    $('#storage-location').textContent = '记录保存在工作台电脑';
+    $('#workspace-client').textContent = 'Lab Note · 已配对设备';
+  }
   $('#today-date').innerHTML = `${esc(boot.today.replaceAll('-',' / '))}<small>北京时间 · Asia/Shanghai</small>`;
   $('#connection').hidden = true;
 }
@@ -142,7 +148,7 @@ function todayStats() {
   return `<div class="stats"><div class="stat"><b>${active.length.toString().padStart(2,'0')}</b><span>培养容器</span><small>${count} 个已填写培养单元</small></div><div class="stat"><b>${cells.size.toString().padStart(2,'0')}</b><span>细胞种类</span><small>按细胞名称汇总</small></div><div class="stat"><b>${checked.toString().padStart(2,'0')}<span> / ${active.length}</span></b><span>今日已核对</span><small>每天 22:00 保存当日快照</small></div></div>`;
 }
 async function switchView(next) {
-  if (!canLeave()) return;
+  if ((next === 'backup' && boot?.mobile_client) || !canLeave()) return;
   dirty = false; frozen = null; selected.clear(); experimentFilter='';view = next;
   if(['home','today','work'].includes(next)){statusFilter='active';homeStatus='active';}
   if(next==='labs'){labModuleFilter='all';labStatusFilter='unfinished';labSearch='';}
@@ -157,6 +163,12 @@ async function switchView(next) {
 }
 function render() {
   document.querySelectorAll('.nav').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+  document.querySelectorAll('[data-mobile-view]').forEach(button => {
+    button.classList.toggle('active', button.dataset.mobileView === view);
+    if (button.dataset.mobileView === view) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  });
+  $('#mobile-more-btn').classList.toggle('active', !!document.querySelector('#mobile-more-sheet .active'));
   renderUndoControl();
   if(view==='home')renderHome();
   else if(view==='cryo')renderCryoWorkspace();
@@ -215,7 +227,7 @@ function renderCultures() {
       $('#cultures').innerHTML = '<div class="panel"><h3>这份快照中没有培养容器</h3><p class="muted">历史记录为只读。要新增容器，请返回“当前培养”。</p></div>';
       return;
     }
-    $('#cultures').innerHTML = `<div class="empty-state">${emptyGraphic()}<h2>从第一个培养容器开始</h2><p>添加培养瓶或孔板，记录细胞和起始日期。<br>孔位可以多选，特殊处理一次填写、同时保存。</p><button class="button primary" id="first-container">＋ 添加我的第一个容器</button><div class="footer-note">尚未录入任何实验数据 · 本地数据库保存</div></div>`;
+    $('#cultures').innerHTML = `<div class="empty-state">${emptyGraphic()}<h2>从第一个培养容器开始</h2><p>添加培养瓶或孔板，记录细胞和起始日期。<br>孔位可以多选，特殊处理一次填写、同时保存。</p><button class="button primary" id="first-container">＋ 添加我的第一个容器</button><div class="footer-note">尚未录入任何实验数据 · ${boot.mobile_client?'保存在工作台电脑':'本地数据库保存'}</div></div>`;
     $('#first-container').onclick = showCreate; return;
   }
   const list = filterCulturesList(all);
@@ -276,6 +288,10 @@ function renderCultures() {
   bindContainerCards();
   renderDetail();
 }
+const plateContentLabels = new Map([
+  ['target_medium', '靶细胞＋培养基'], ['target_effector', '靶细胞＋效应细胞'],
+  ['medium', '仅培养基'], ['pbs', '仅 PBS'],
+]);
 function plateMarkup(c, readonly) {
   const dims = boot.layouts[c.type];
   if (!dims) {
@@ -296,10 +312,12 @@ function plateMarkup(c, readonly) {
       const key = letter+col, w = c.wells[key], day = frozen?w.day:dayOf(w);
       const hash = [...(w.cell+w.treatment)].reduce((n,ch)=>(n+ch.charCodeAt(0))%4,0);
       const palette = [['#e6eee0','#c9d9bd'],['#e1ebed','#bed3d8'],['#f3ead8','#e1cfa9'],['#ece5ed','#d6c4d8']][hash];
+      const content = plateContentLabels.get(w.assay_contents?.kind);
+      const label = content || w.cell || '空';
       const group = wellGroupFor(c,key);
-      const hoverText = [key, w.cell || '空孔', group && '培养组：'+group.name, w.cell && day != null && 'Day '+day].filter(Boolean).join(' · ');
+      const hoverText = [key, w.cell || content || '空孔', w.cell && content, group && '培养组：'+group.name, w.cell && day != null && 'Day '+day].filter(Boolean).join(' · ');
       const title = [hoverText, w.treatment].filter(Boolean).join('\n');
-      markup += `<button class="well ${w.cell?'filled':''} ${selected.has(key)?'selected':''}" style="--well-bg:${palette[0]};--well-border:${palette[1]}" data-well="${key}" ${group?`data-well-group-color="${wellGroupColorIndex(group)}"`:''} data-well-hover="${esc(hoverText)}" aria-label="${esc(hoverText)}" aria-pressed="${selected.has(key)}" title="${esc(title)}"><strong>${key}</strong><small>${esc(w.cell||'空')}</small></button>`;
+      markup += `<button class="well ${w.cell?'filled':''} ${selected.has(key)?'selected':''}" style="--well-bg:${palette[0]};--well-border:${palette[1]}" data-well="${key}" ${w.cell?`data-well-palette="${hash}"`:''} ${content?`data-well-content="${esc(w.assay_contents.kind)}"`:''} ${group?`data-well-group-color="${wellGroupColorIndex(group)}"`:''} data-well-hover="${esc(hoverText)}" aria-label="${esc(hoverText)}" aria-pressed="${selected.has(key)}" title="${esc(title)}"><strong>${key}</strong><small>${esc(label)}</small></button>`;
     }
   }
   return markup+'</div></div>';
@@ -433,7 +451,7 @@ async function command(action,payload={}) {
     if(action==='wells'&&payload.patch?.treatment?.trim())boot.treatments=treatmentHistory(state,[payload.patch.treatment,...(boot.treatments||[])]);
     if(action==='wells'&&payload.patch?.cell_count&&!payload.patch.cell_count.clear){const count=payload.patch.cell_count;boot.count_history||={};for(const [key,value] of [[count.mode+'_units',count.unit],['volume_units',count.volume_unit]])if(value)boot.count_history[key]=[...new Set([value,...(boot.count_history[key]||[])])];}
     if(currentId===payload.id && ((['wells','clear'].includes(action) && boot.layouts[current()?.type]) || action==='rename'))selected.clear();
-    dirty=false;render();toast('已保存到本地数据库');return true;
+    dirty=false;render();toast(boot.mobile_client ? '已保存到工作台电脑' : '已保存到本地数据库');return true;
   }
   catch(error){toast(error.message,true);return false;}
   finally{busy=false;if(typeof renderUndoControl==='function')renderUndoControl();}
@@ -644,7 +662,40 @@ function renderBackup() {
   };
   $('#download-backup').onclick=async()=>{if(busy)return;busy=true;try{const result=await api('/api/backup',{});const a=document.createElement('a');a.href=result.url;a.download='';a.click();await load();if(view==='backup'){renderBackup();loadStorageStats();}toast('完整备份已生成，下载已开始');}catch(error){toast(error.message,true);}finally{busy=false;if(typeof renderUndoControl==='function')renderUndoControl();}};
 }
-document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>switchView(b.dataset.view));
+const moreButton = $('#mobile-more-btn');
+const moreSheet = $('#mobile-more-sheet');
+function setMoreOpen(open, restoreFocus = true) {
+  const wasOpen = !moreSheet.hidden;
+  moreSheet.hidden = !open;
+  $('#mobile-more-backdrop').hidden = !open;
+  moreButton.setAttribute('aria-expanded', String(open));
+  if (open) $('#mobile-more-close').focus();
+  else if (wasOpen && restoreFocus) moreButton.focus();
+}
+moreButton.onclick = () => setMoreOpen(moreSheet.hidden);
+$('#mobile-more-close').onclick = $('#mobile-more-backdrop').onclick = () => setMoreOpen(false);
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !moreSheet.hidden) setMoreOpen(false);
+});
+matchMedia('(max-width: 680px)').addEventListener('change', () => setMoreOpen(false, false));
+document.querySelectorAll('[data-view], [data-mobile-view]').forEach(button => {
+  button.onclick = () => { setMoreOpen(false); switchView(button.dataset.view || button.dataset.mobileView); };
+});
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register('/sw.js', {scope: '/'}).catch(() => {});
+}
+window.addEventListener('offline', () => {
+  $('#connection').hidden = false;
+  $('#connection').textContent = '网络已断开。页面中的编辑仍保留，请在重新连接工作台后保存。';
+});
+window.addEventListener('online', () => {
+  if (editingOrBusy() || frozen) {
+    $('#connection').textContent = '网络已恢复。当前页面已保留，可继续操作。';
+    return;
+  }
+  $('#connection').textContent = '网络已恢复，正在连接工作台。';
+  refreshCurrentView();
+});
 $('#close-create').onclick=$('#cancel-create').onclick=()=>$('#create-dialog').close();
 $('#create-form').onsubmit=async e=>{
   e.preventDefault();const form=new FormData(e.target);
@@ -658,7 +709,7 @@ $('#create-form').onsubmit=async e=>{
   if(ok){$('#create-dialog').close();view='today';experimentFilter='';currentId=state.containers.at(-1).id;statusFilter='active';search='';selected=new Set(Object.keys(current().wells));render();}
 };
 window.addEventListener('beforeunload',e=>{if(dirty||$('#cryo-dialog').open||$('#manual-group-dialog').open||$('#well-group-dialog')?.open||$('#transfer-dialog').open||$('#transfer-system-dialog').open||$('#transfer-review-dialog').open||$('#occupied-target-dialog').open||$('#relocation-dialog').open||$('#activity-dialog').open||$('#quick-medium-dialog').open||$('#lab-record-dialog').open){e.preventDefault();e.returnValue='';}});
-async function start(){try{await load();render();setTimeout(() => runUpdateCheck(false), 1500);}catch(error){$('#connection').hidden=false;$('#connection').textContent='未连接到本机工作台。请重新启动实验日记并刷新页面。';}}
+async function start(){try{await load();render();if (!boot.mobile_client) setTimeout(() => runUpdateCheck(false), 1500);}catch(error){$('#connection').hidden=false;$('#connection').textContent='未连接到工作台。请检查网络和运行 Lab Note 的电脑，然后刷新页面。';}}
 start();
 function editingOrBusy() {
   return dirty || busy || modalOpen() || inlineRelocationActive
@@ -687,7 +738,7 @@ async function refreshCurrentView() {
   } catch (error) {
     if (!stillCurrent()) return;
     $('#connection').hidden=false;
-    $('#connection').textContent='与本机工作台的连接已中断。请检查工作台，尚未保存的编辑仍在本页。';
+    $('#connection').textContent='与工作台的连接已中断。请检查网络和工作台，尚未保存的编辑仍在本页。';
   } finally {
     refreshPending = false;
   }
