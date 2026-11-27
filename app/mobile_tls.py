@@ -87,7 +87,9 @@ if ($isRoot) {
 $parameters = [CngKeyCreationParameters]::new()
 $parameters.ExportPolicy = [CngExportPolicies]::AllowPlaintextExport -bor [CngExportPolicies]::AllowExport
 $parameters.Parameters.Add([CngProperty]::new('Length', [BitConverter]::GetBytes([int]$bits), [CngPropertyOptions]::None))
-$key = [CngKey]::Create([CngAlgorithm]::Rsa, $null, $parameters)
+# PowerShell 5.1 converts $null to an empty string for string parameters.
+# CNG requires a real null key name to create an ephemeral key.
+$key = [CngKey]::Create([CngAlgorithm]::Rsa, [System.Management.Automation.Language.NullString]::Value, $parameters)
 $rsa = [RSACng]::new($key)
 $padding = [RSASignaturePadding]::Pkcs1
 $request = [CertificateRequest]::new([X500DistinguishedName]::new($subject), $rsa, [HashAlgorithmName]::SHA256, $padding)
