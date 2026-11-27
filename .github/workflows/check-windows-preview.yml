@@ -44,17 +44,31 @@ jobs:
           $dir = Join-Path $env:RUNNER_TEMP 'Lab Note 测试'
           Expand-Archive -LiteralPath $zip -DestinationPath $dir
           Set-Location (Join-Path $dir 'Lab-Note')
-          & .\runtime\python.exe -X utf8 -B tests/test_mobile_tls.py -v
-          if ($LASTEXITCODE -ne 0) { throw 'Native Windows TLS test failed' }
-          & .\runtime\python.exe -X utf8 -B tests/test_mobile_access.py -v
-          if ($LASTEXITCODE -ne 0) { throw 'Windows network and pairing checks failed' }
+          function Test-PythonScript([string] $script) {
+            $lines = & .\runtime\python.exe -X utf8 -B $script -v 2>&1
+            $code = $LASTEXITCODE
+            $lines | ForEach-Object { Write-Host "$_" }
+            if ($code -ne 0) {
+              $detail = (($lines | Select-Object -Last 24) -join ' | ')
+              Write-Output "::error title=${script}::$detail"
+              throw "$script failed"
+            }
+          }
+          Test-PythonScript 'tests/test_mobile_tls.py'
+          Test-PythonScript 'tests/test_mobile_access.py'
           & .\Start-Lab-Note.cmd -h
           if ($LASTEXITCODE -ne 0) { throw 'Windows CLI help failed' }
           $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 8875)
           try {
             $listener.Start()
-            & .\Check-Lab-Note.cmd ci
-            if ($LASTEXITCODE -ne 0) { throw 'Windows self-check failed' }
+            $lines = & .\Check-Lab-Note.cmd ci 2>&1
+            $code = $LASTEXITCODE
+            $lines | ForEach-Object { Write-Host "$_" }
+            if ($code -ne 0) {
+              $detail = (($lines | Select-Object -Last 20) -join ' | ')
+              Write-Output "::error title=Windows self-check::$detail"
+              throw 'Windows self-check failed'
+            }
           } finally {
             $listener.Stop()
           }
