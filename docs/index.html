@@ -21,8 +21,8 @@
       } catch (_) {}
     })();
   </script>
-  <link rel="stylesheet" href="share.css">
-  <script defer src="share.js"></script>
+  <link rel="stylesheet" href="share.css?v=1.7.1-2">
+  <script defer src="share.js?v=1.7.1-2"></script>
 </head>
 <body>
   <a class="skip" href="#main">跳到正文</a>
@@ -97,7 +97,7 @@
             <span><i></i>空位</span>
             <span><i class="picked"></i>当前选中</span>
           </div>
-          <p class="demo-compat" id="demo-compat">支持 20 种内置容器：6 / 12 / 24 / 48 / 96 孔板（含白底/黑底）、T25 / T75 / T175 培养瓶、35–150mm 培养皿，另含 Transwell 6/12/24 孔板和低吸附 U 底 96 孔板；瓶/皿支持 1–100 个同组管理。</p>
+          <p class="demo-compat" id="demo-compat">支持 20 种内置容器：6 / 12 / 24 / 48 / 96 孔板（含白底/黑底/低吸附 U 底）、Transwell 6 / 12 / 24 孔板、T25 / T75 / T175 培养瓶、35–150mm 培养皿，瓶/皿支持 1–100 个同组管理。</p>
 
           <div class="record" aria-live="polite">
             <div class="coordinate" id="coord">—</div>
@@ -120,8 +120,7 @@
           <p>从首页进入培养瓶、培养皿、多孔板或冻存盒，给选中的多个单元统一登记操作；单孔、单瓶或单管条件分化时，也可拆分独立记录并保留完整谱系。</p>
         </div>
         <figure class="workbench-frame">
-          <img class="workbench-img-light" src="assets/workbench.png?v=1.7.1" alt="Lab Note 合成演示数据工作台浅色模式：极简卡片布局、单行今日核对进度条、Transwell 24孔板、类器官共培养板与常规培养容器" width="2560" height="1600" loading="lazy">
-          <img class="workbench-img-dark" src="assets/workbench-dark.png?v=1.7.1" alt="Lab Note 合成演示数据工作台深色模式：极简卡片布局、单行今日核对进度条、Transwell 24孔板、类器官共培养板与常规培养容器" width="2560" height="1600" loading="lazy">
+          <img id="workbench-img" data-light-src="assets/workbench.png?v=1.7.1" data-dark-src="assets/workbench-dark.png?v=1.7.1" src="assets/workbench.png?v=1.7.1" alt="Lab Note 合成演示数据工作台：极简卡片布局、单行今日核对进度条、Transwell 24孔板、类器官共培养板与常规培养容器" width="2560" height="1600" loading="lazy">
         </figure>
         <div class="features">
           <article>

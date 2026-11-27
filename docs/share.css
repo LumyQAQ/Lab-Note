@@ -547,9 +547,6 @@ nav a:hover, .inline:hover, .footer a:hover { text-decoration-color: currentColo
   border-radius: 7px;
   transition: transform 0.35s ease;
 }
-.workbench-frame .workbench-img-dark { display: none; }
-:root[data-theme="dark"] .workbench-frame .workbench-img-light { display: none; }
-:root[data-theme="dark"] .workbench-frame .workbench-img-dark { display: block; }
 .workbench-frame:hover img { transform: scale(1.015); }
 
 .features {

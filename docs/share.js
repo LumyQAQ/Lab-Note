@@ -15,6 +15,11 @@ const INITIAL_VISIBLE = 3;
     btn.textContent = dark ? '浅色' : '深色';
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute('content', dark ? '#111815' : '#f6f6ee');
+    const wbImg = document.getElementById('workbench-img');
+    if (wbImg) {
+      const targetSrc = dark ? wbImg.dataset.darkSrc : wbImg.dataset.lightSrc;
+      if (targetSrc && wbImg.getAttribute('src') !== targetSrc) wbImg.setAttribute('src', targetSrc);
+    }
   };
   apply(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
   btn.onclick = () => {
@@ -41,7 +46,7 @@ const INITIAL_VISIBLE = 3;
 
   const MODES = {
     culture: {
-      compat: '支持 20 种内置容器：6 / 12 / 24 / 48 / 96 孔板（含白底/黑底）、T25 / T75 / T175 培养瓶、35–150mm 培养皿，另含 Transwell 6/12/24 孔板和低吸附 U 底 96 孔板；瓶/皿支持 1–100 个同组管理。',
+      compat: '支持 20 种内置容器：6 / 12 / 24 / 48 / 96 孔板（含白底/黑底/低吸附 U 底）、Transwell 6 / 12 / 24 孔板、T25 / T75 / T175 培养瓶、35–150mm 培养皿，瓶/皿支持 1–100 个同组管理。',
       defaultPreset: 'plate-24',
       presets: [
         {id: 'plate-6', label: '6 孔板', kind: 'plate', rows: 2, cols: 3, title: '6 孔板', micro: '培养容器预览 · 0 / 6 已填写', cls: 'spacious'},
@@ -52,7 +57,7 @@ const INITIAL_VISIBLE = 3;
       ],
     },
     cryo: {
-      compat: '支持液氮罐与 -80℃ 冰箱，任意 1×1–12×12 自定义冻存盒尺寸、自定义吊架层级，以及 A1 字母 / 纯数字双坐标编号。',
+      compat: '支持液氮罐、-80℃、-20℃、4℃ 四类设备与 9 大生物样本类别，任意 1×1–12×12 自定义冻存盒尺寸、自定义吊架层级，以及 A1 字母 / 纯数字双坐标编号。',
       defaultPreset: 'cryo-9x9',
       presets: [
         {id: 'cryo-9x9', label: '9×9 (81格)', kind: 'cryo', rows: 9, cols: 9, numbering: 'alpha', title: '9×9 冻存盒（81 格）', micro: '冻存库位预览 · 0 / 81 已占用', cls: 'medium'},
