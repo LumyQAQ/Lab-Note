@@ -32,7 +32,7 @@ jobs:
           PREFLIGHT: ${{ inputs.source_preflight }}
           ASSET: Lab-Note-1.5.2-preview.1-Windows-x64.zip
           VERSION: v1.5.2-preview.1
-          EXPECTED_SHA256: 624b74fa806a9555332ce8ca315281384461f6670217ce2493fc391bd757d92b
+          EXPECTED_SHA256: 6fa6907aab2ed3d9c8e4cac8ff19bd92490b0c2ce84ddaf3a52e15c7aa6e8884
         run: |
           $ErrorActionPreference = 'Stop'
           $assetUrl = "https://github.com/LumyQAQ/Lab-Note/releases/download/$env:VERSION/$env:ASSET"
