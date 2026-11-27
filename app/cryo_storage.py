@@ -321,9 +321,13 @@ def _norm_treatments(lot):
     return tuple(sorted({tag.strip().casefold() for tag in lot.get('special_treatments') or [] if tag.strip()}))
 
 
+def _norm_resistance(lot):
+    return tuple(sorted({tag.strip().casefold() for tag in (lot.get('resistance_tags') or []) if tag and tag.strip()}))
+
+
 def _same_donor_compatible(a, b):
-    da = (a.get('donor') or '').strip().casefold()
-    db = (b.get('donor') or '').strip().casefold()
+    da = (a.get('donor') or a.get('source_subject') or '').strip().casefold()
+    db = (b.get('donor') or b.get('source_subject') or '').strip().casefold()
     return not da or not db or da == db
 
 
@@ -338,15 +342,20 @@ def relation_tier(anchor, other):
         return None
     if not _same_donor_compatible(anchor, other):
         return None
-    same_tx = _norm_treatments(anchor) == _norm_treatments(other)
+    tx_a, tx_b = _norm_treatments(anchor), _norm_treatments(other)
+    res_a, res_b = _norm_resistance(anchor), _norm_resistance(other)
+    same_tx, same_res = tx_a == tx_b, res_a == res_b
     sa = (anchor.get('subclone') or '').strip().casefold()
     sb = (other.get('subclone') or '').strip().casefold()
     same_clone = (sa == sb)
-    if same_tx and same_clone and (anchor.get('at') or '')[:10] == (other.get('at') or '')[:10]:
+    same_day = (anchor.get('at') or '')[:10] == (other.get('at') or '')[:10]
+    if same_tx and same_res and same_clone and same_day:
         return 'strong'
-    if same_tx and same_clone:
+    if same_tx and same_res and (same_clone or same_day):
         return 'weak'
-    return 'weaker'
+    shared_tx = bool((set(tx_a) - {'wt'}) & (set(tx_b) - {'wt'}))
+    shared_res = bool(set(res_a) & set(res_b))
+    return 'weaker' if shared_tx or shared_res else None
 
 
 def _parse_passage_num(lot):
@@ -489,17 +498,19 @@ def cross_category_related_batches(state, lot_id):
     for other in batches:
         if other['id'] == anchor['id']:
             continue
+        o_cat = other.get('sample_category') or 'cell'
+        if a_cat == 'cell' and o_cat == 'cell':
+            continue
         o_subj = (other.get('source_subject') or other.get('donor') or '').strip().casefold()
         o_model = (other.get('disease_model') or '').strip().casefold()
         o_spec = (other.get('specimen_type') or '').strip().casefold()
-        o_cat = other.get('sample_category') or 'cell'
         rem = batch_remaining(state, other)
         entry = {'batch': other, 'remaining': rem, 'category': o_cat}
         if a_subj and o_subj and a_subj == o_subj:
             groups['same_subject'].append(entry)
         elif a_model and o_model and a_model == o_model:
             groups['same_model'].append(entry)
-        elif a_spec and o_spec and a_spec == o_spec and (a_cat != 'cell' or o_cat != 'cell'):
+        elif a_spec and o_spec and a_spec == o_spec and a_cat != 'cell' and o_cat != 'cell':
             groups['same_specimen'].append(entry)
     for key in groups:
         groups[key].sort(key=lambda item: (item['remaining'] <= 0, item['category'], item['batch'].get('at', '')), reverse=False)
@@ -1388,7 +1399,7 @@ def _stock_group_key(lot):
         (lot.get('specimen_type') or '').strip().casefold(),
         _norm_cell(lot),
         _norm_treatments(lot),
-        tuple(sorted(t.strip().casefold() for t in (lot.get('resistance_tags') or []) if t.strip())),
+        _norm_resistance(lot),
         (lot.get('subclone') or '').strip().casefold(),
         (lot.get('donor') or '').strip().casefold(),
     )

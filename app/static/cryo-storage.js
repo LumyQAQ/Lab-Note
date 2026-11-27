@@ -133,10 +133,11 @@ function cryoCrossCategoryRelated(lotId) {
   const aCat = cryoBatchCategory(anchor);
   for (const other of lots) {
     if (other.id === anchor.id) continue;
+    const oCat = cryoBatchCategory(other);
+    if (aCat === 'cell' && oCat === 'cell') continue;
     const oSubj = String(other.source_subject || other.donor || '').trim().toLowerCase();
     const oModel = String(other.disease_model || '').trim().toLowerCase();
     const oSpec = String(other.specimen_type || '').trim().toLowerCase();
-    const oCat = cryoBatchCategory(other);
     const entry = {
       lot: other,
       remaining: cryoBatchRemaining(other),
@@ -146,7 +147,7 @@ function cryoCrossCategoryRelated(lotId) {
     };
     if (aSubj && oSubj && aSubj === oSubj) res.sameSubject.push(entry);
     else if (aModel && oModel && aModel === oModel) res.sameModel.push(entry);
-    else if (aSpec && oSpec && aSpec === oSpec && (aCat !== 'cell' || oCat !== 'cell')) res.sameSpecimen.push(entry);
+    else if (aSpec && oSpec && aSpec === oSpec && aCat !== 'cell' && oCat !== 'cell') res.sameSpecimen.push(entry);
   }
   const sortFn = (a, b) => (a.remaining <= 0) - (b.remaining <= 0) || a.category.localeCompare(b.category) || (b.lot.at || '').localeCompare(a.lot.at || '');
   res.sameSubject.sort(sortFn);
@@ -298,7 +299,7 @@ function cryoStockGroupKey(lot) {
     cryoNormTreatments(lot).join('\x1f'),
     res,
     String(lot?.subclone || '').trim().toLowerCase(),
-    String(lot?.donor || '').trim().toLowerCase()
+    String(lot?.donor || lot?.source_subject || '').trim().toLowerCase()
   ].join('|');
 }
 function cryoStockGroupRemainingMap() {
@@ -357,8 +358,12 @@ function cryoNormCell(lot) { return String(lot?.name || '').trim().toLowerCase()
 function cryoNormTreatments(lot) {
   return [...new Set((lot?.special_treatments || []).map(t => String(t || '').trim().toLowerCase()).filter(Boolean))].sort();
 }
+function cryoNormResistance(lot) {
+  return [...new Set((lot?.resistance_tags || []).map(t => String(t || '').trim().toLowerCase()).filter(Boolean))].sort();
+}
 function cryoDonorCompatible(a, b) {
-  const da = String(a?.donor || '').trim().toLowerCase(), db = String(b?.donor || '').trim().toLowerCase();
+  const da = String(a?.donor || a?.source_subject || '').trim().toLowerCase();
+  const db = String(b?.donor || b?.source_subject || '').trim().toLowerCase();
   return !da || !db || da === db;
 }
 function cryoRelationTier(anchor, other) {
@@ -367,23 +372,40 @@ function cryoRelationTier(anchor, other) {
   if (sa && sb && sa !== sb) return null;
   if (!cryoNormCell(anchor) || cryoNormCell(anchor) !== cryoNormCell(other)) return null;
   if (!cryoDonorCompatible(anchor, other)) return null;
-  const txA = cryoNormTreatments(anchor).join('\x00'), txB = cryoNormTreatments(other).join('\x00');
+  const txListA = cryoNormTreatments(anchor), txListB = cryoNormTreatments(other);
+  const resListA = cryoNormResistance(anchor), resListB = cryoNormResistance(other);
+  const sameTx = txListA.join('\x00') === txListB.join('\x00');
+  const sameRes = resListA.join('\x00') === resListB.join('\x00');
   const cloneA = String(anchor?.subclone || '').trim().toLowerCase();
   const cloneB = String(other?.subclone || '').trim().toLowerCase();
   const sameClone = cloneA === cloneB;
-  if (txA === txB && sameClone && String(anchor.at || '').slice(0, 10) === String(other.at || '').slice(0, 10)) return 'strong';
-  if (txA === txB && sameClone) return 'weak';
-  return 'weaker';
+  const sameDay = String(anchor.at || '').slice(0, 10) === String(other.at || '').slice(0, 10);
+  if (sameTx && sameRes && sameClone && sameDay) return 'strong';
+  if (sameTx && sameRes && (sameClone || sameDay)) return 'weak';
+  const nonWtB = new Set(txListB.filter(t => t !== 'wt'));
+  const sharedTx = txListA.some(t => t !== 'wt' && nonWtB.has(t));
+  const resSetB = new Set(resListB);
+  const sharedRes = resListA.some(r => resSetB.has(r));
+  if (sharedTx || sharedRes) return 'weaker';
+  return null;
 }
-function cryoRelatedGroups(lotId) {
+function cryoRelatedGroups(lotId, excludeSlotKeys = null) {
   const lots = state?.frozen_batches || [];
   const anchor = lots.find(b => b.id === lotId);
   const groups = {strong: [], weak: [], weaker: []};
   if (!anchor) return groups;
+  const excluded = excludeSlotKeys instanceof Set ? excludeSlotKeys : null;
   for (const other of lots) {
-    const tier = other.id === anchor.id ? 'strong' : cryoRelationTier(anchor, other);
+    const sameBatch = other.id === anchor.id;
+    if (sameBatch && (!excluded || !excluded.size)) continue;
+    const tier = sameBatch ? 'strong' : cryoRelationTier(anchor, other);
     if (!tier) continue;
-    groups[tier].push({lot: other, remaining: cryoBatchRemaining(other), placed: cryoBatchPlacedSlots(other.id)});
+    const allPlaced = cryoBatchPlacedSlots(other.id);
+    const placed = excluded ? allPlaced.filter(p => !excluded.has(`${p.box.id}|${p.slot}`)) : allPlaced;
+    const excludedCount = allPlaced.length - placed.length;
+    const remaining = Math.max(0, cryoBatchRemaining(other) - excludedCount);
+    if ((sameBatch || excludedCount) && remaining <= 0) continue;
+    groups[tier].push({lot: other, remaining, placed, sameBatchSibling: sameBatch});
   }
   for (const key of ['strong', 'weak', 'weaker']) {
     groups[key].sort((a, b) => (a.lot.id === anchor.id ? -1 : b.lot.id === anchor.id ? 1 : (b.lot.at || '').localeCompare(a.lot.at || '')));
@@ -1831,7 +1853,8 @@ function cryoInspectorMarkup(box, lotsById, risks, groupRemMap = null, m80Alerts
   const risk = risks.get(lot.id) || {level: 'none', hits: 0, events: []};
   const m80 = m80Map.get(lot.id) || null;
   const rem = cryoBatchRemaining(lot);
-  const related = isCell ? cryoRelatedGroups(lot.id) : null;
+  const selectedSlotKeys = new Set(occupied.map(k => `${box.id}|${k}`));
+  const related = isCell ? cryoRelatedGroups(lot.id, selectedSlotKeys) : null;
   const crossRel = cryoCrossCategoryRelated(lot.id);
   const hasCrossRel = crossRel.sameSubject.length || crossRel.sameModel.length || crossRel.sameSpecimen.length;
   const gRem = gMap.get(lot.id) ?? rem;
@@ -1854,16 +1877,18 @@ function cryoInspectorMarkup(box, lotsById, risks, groupRemMap = null, m80Alerts
   const tierRow = (title, items) => {
     const total = items.reduce((n, x) => n + x.remaining, 0);
     return `<div class="cryo-related-tier">
-      <div class="cryo-related-tier-head"><span>${title}</span><span>还剩 ${total} 支（${items.length} 批）</span></div>
+      <div class="cryo-related-tier-head"><span>${title}</span><span>另有 ${total} 支${items.length ? `（${items.length} 项）` : ''}</span></div>
       ${items.length ? `<ul>${items.map(x => {
-        const p = x.placed[0];
         const r = risks.get(x.lot.id) || {level: 'none'};
         const badge = r.level === 'red' ? ' ⛔' : r.level === 'yellow' ? ' ⚠' : '';
         const tx = x.lot.special_treatments?.length ? ` · ${x.lot.special_treatments.join('/')}` : '';
         const cl = x.lot.subclone ? ` [${x.lot.subclone}]` : '';
-        const jump = p ? `<button type="button" class="text-button" data-jump-box="${esc(p.box.id)}" data-jump-slot="${esc(p.slot)}">${esc(cryoBoxLabel(p.box))} ${esc(p.slot)}</button>` : `<span>${esc(x.lot.storage_stage === 'gradient' ? '暂存盒' : (x.lot.location || '未定位'))}</span>`;
-        return `<li><span><strong>${esc(x.lot.name)}${esc(cl)}${esc(tx)}</strong>${badge} · ${esc((x.lot.at || '').slice(0, 10))} · 剩 ${x.remaining} 支</span>${jump}</li>`;
-      }).join('')}</ul>` : '<p class="muted" style="margin:4px 0 0">暂无其他关联批次</p>'}
+        const sibTag = x.sameBatchSibling ? ' · 同批其他格位' : '';
+        const jumps = x.placed.length
+          ? `<span class="cryo-jump-list">${x.placed.map(p => `<button type="button" class="text-button" data-jump-box="${esc(p.box.id)}" data-jump-slot="${esc(p.slot)}">${esc(cryoBoxLabel(p.box))} ${esc(p.slot)}</button>`).join('')}</span>`
+          : `<span>${esc(x.lot.storage_stage === 'gradient' ? '暂存盒' : (x.lot.location || '未定位'))}</span>`;
+        return `<li><span><strong>${esc(x.lot.name)}${esc(cl)}${esc(tx)}</strong>${badge} · ${esc((x.lot.at || '').slice(0, 10))}${sibTag} · 剩 ${x.remaining} 支</span>${jumps}</li>`;
+      }).join('')}</ul>` : '<p class="muted" style="margin:4px 0 0">暂无其他关联样本</p>'}
     </div>`;
   };
 
@@ -1937,9 +1962,9 @@ function cryoInspectorMarkup(box, lotsById, risks, groupRemMap = null, m80Alerts
     </section>` : ''}
     ${isCell ? `<section class="cryo-related-panel">
       <h4>关联细胞库存余量</h4>
-      ${tierRow('强相关（同日同组）', related.strong)}
-      ${tierRow('弱相关（同细胞同处理 · 不同日）', related.weak)}
-      ${tierRow('更弱相关（同细胞 · 其他处理/亚克隆）', related.weaker)}
+      ${tierRow('强相关（同日同组同克隆）', related.strong)}
+      ${tierRow('弱相关（同处理不同日 / 同日不同亚克隆）', related.weak)}
+      ${tierRow('更弱相关（同细胞 · 共享特殊处理或抗性）', related.weaker)}
     </section>` : ''}`;
 }
 
@@ -2298,7 +2323,7 @@ function cryoBatchesMarkup() {
         <div class="cryo-meta-item"><small>${isCell ? '管内细胞数' : '关键参数（浓度/滴度/体积等）'}</small><strong>${esc(isCell ? (cryoFormatCount(f) || '未记录') : (cryoSampleMetaSummary(f) || '未记录'))}</strong></div>
         ${isCell ? `<div class="cryo-meta-item"><small>复苏容器备注</small><strong>${esc(f.suggested_vessel || '未记录')}</strong></div>` : ''}
       </div>
-      ${isCell ? `<p class="muted">关联余量：强相关（同日同组）<strong>${strongRem} 支</strong> · 弱相关（同处理不同日）<strong>${weakRem} 支</strong> · 更弱相关（同细胞其他处理）<strong>${weakerRem} 支</strong></p>` : ''}
+      ${isCell ? `<p class="muted">本批剩 <strong>${rem} 支</strong> · 其他关联余量：强相关（同日同组同克隆）<strong>${strongRem} 支</strong> · 弱相关（同处理不同日/同日不同克隆）<strong>${weakRem} 支</strong> · 更弱相关（共享处理或抗性）<strong>${weakerRem} 支</strong></p>` : ''}
       <div class="actions" style="margin:8px 0">
         ${placed.map(p => `<button type="button" class="cryo-slot-chip" data-jump-box="${esc(p.box.id)}" data-jump-slot="${esc(p.slot)}">${esc(cryoBoxLabel(p.box))} · ${esc(p.slot)}${p.entry.vial_label ? ' (' + esc(p.entry.vial_label) + ')' : ''}</button>`).join('')}
         ${unp > 0 ? `<button type="button" class="button secondary" data-place-lot="${esc(f.id)}">为剩余 ${unp} 管入盒落位</button>` : ''}
@@ -2779,21 +2804,22 @@ function cryoLastMedium(lot) {
   const peers = new Set((state.frozen_batches || []).filter(b => cryoStockGroupKey(b) === group).map(b => b.id));
   for (const w of [...(state.frozen_withdrawals || [])].reverse()) {
     if (!w.discarded && (w.mode === 'thaw' || w.destination) && peers.has(w.lot_id) && present(w.medium)) {
-      candidates.push({medium: w.medium, at: w.at, label: '复苏记录 ' + w.at.replace('T', ' ')});
+      candidates.push({medium: w.medium, priority: 1, at: w.at, label: '复苏记录 ' + w.at.replace('T', ' ')});
     }
   }
   for (const src of lot.sources || []) {
-    if (present(src.snapshot?.medium)) candidates.push({medium: src.snapshot.medium, at: lot.at, label: '冻存来源 ' + [src.name, src.well].filter(Boolean).join(' / ')});
+    if (present(src.snapshot?.medium)) candidates.push({medium: src.snapshot.medium, priority: 0, at: lot.at, label: '冻存来源 ' + [src.name, src.well].filter(Boolean).join(' / ')});
   }
   for (const container of state.containers || []) {
     for (const [key, w] of Object.entries(container.wells || {})) {
       if (w.cell && cryoNormCell({name: w.cell}) === cryoNormCell(lot) && present(w.medium)) {
-        candidates.push({medium: w.medium, at: w.introduced_at || container.created_at, label: [container.name, key].join(' / ')});
+        candidates.push({medium: w.medium, priority: 2, at: w.introduced_at || container.created_at, label: [container.name, key].join(' / ')});
       }
     }
   }
-  // Thaws are recorded to the minute. At equal times prefer the latest explicit thaw entry.
-  candidates.sort((a, b) => (b.at || '').slice(0, 16).localeCompare((a.at || '').slice(0, 16)));
+  // Prefer this lot's recorded source, then related thaws, then same-name cultures.
+  // Within each source tier, equal-minute thaws retain the latest explicit entry.
+  candidates.sort((a, b) => a.priority - b.priority || (b.at || '').slice(0, 16).localeCompare((a.at || '').slice(0, 16)));
   return candidates[0] || null;
 }
 

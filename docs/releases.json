@@ -1,5 +1,26 @@
 [
   {
+    "version": "1.7.1",
+    "date": "2026-11-27",
+    "title": "冻存关联口径严谨化：去除强行关联实验、排除自身强相关、亚克隆归入弱相关与宣传页缓存优化",
+    "highlights": [
+      "去除冻存管按细胞名模糊强行关联实验，仅保留显式关联（experiment_refs）与真实冻存/复苏培养单元血缘关联；阻止「跨类别关联样本」重复列出同大类细胞，并按样本大类隔离库存余量与关联分组。",
+      "冻存样本不再与当前选中格位自身强相关：多管同批次展示其余格位跳转按钮（如选中 A3 时精准指向 A4），单管独立批次不再把自己列进强相关。",
+      "优化三层细胞关联生物学口径：同日同处理同抗性的不同亚克隆归入「弱相关」，「更弱相关」需至少共享一项非 WT 特殊处理或相同抗性标签，无关修饰株不再混入。",
+      "复苏沿用上次培养基配方优先使用真实冻存来源孔配方；安装介绍页工作台示意图加入版本查询参数以破除浏览器旧缓存。"
+    ],
+    "mac": {
+      "tag": "v1.7.1",
+      "release_url": "https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.7.1",
+      "download_url": "downloads/lab-note-v1.7.1.zip"
+    },
+    "win": {
+      "tag": "v1.7.1-preview.1",
+      "release_url": "https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.7.1-preview.1",
+      "download_url": "https://github.com/LumyQAQ/Lab-Note/releases/download/v1.7.1-preview.1/Lab-Note-1.7.1-preview.1-Windows-x64.zip"
+    }
+  },
+  {
     "version": "1.7.0",
     "date": "2026-11-27",
     "title": "全样本冻存库、存放时间核查、Word 模板与新孔板模拟",

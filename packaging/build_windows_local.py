@@ -8,7 +8,7 @@ import zipfile
 
 ROOT=Path(__file__).resolve().parents[1]
 RUNTIME_SHA256='90905e64a840557d8c1bc4f5b74db3d7ee85e3ffb217611cac1c7813acea4159'
-NAME='Lab-Note-1.7.0-preview.1-Windows-x64.zip'
+NAME='Lab-Note-1.7.1-preview.1-Windows-x64.zip'
 
 
 def build(runtime_path,out):
@@ -37,7 +37,7 @@ app/tzdata/Shanghai.tzif 是 IANA TZDB 中的 Asia/Shanghai 区域数据（版�
             info=zipfile.ZipInfo('Lab-Note/'+path.as_posix(),(2026,1,1,0,0,0))
             info.create_system=3;info.external_attr=0o100644<<16
             archive.writestr(info,content,compress_type=zipfile.ZIP_DEFLATED)
-        put('VERSION', b'1.7.0-preview.1\n')
+        put('VERSION', b'1.7.1-preview.1\n')
         for f in app_files+extra:put(f,(ROOT/f).read_bytes())
         put('使用说明.txt',(ROOT/'packaging/windows-readme.txt').read_text(encoding='utf-8').replace('\n','\r\n').encode('utf-8-sig'))
         put('第三方许可说明.txt',license_text.encode('utf-8-sig'))

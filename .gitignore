@@ -170,3 +170,7 @@
 !/tests/test_biobank_browser.cjs
 !/tests/test_plates_browser.cjs
 !/tests/test_workday_layouts.py
+!/docs/downloads/lab-note-v1.7.1.zip
+!/docs/downloads/lab-note-v1.7.1.zip.sig
+!/tests/test_cryo_relations.py
+!/tests/test_cryo_relations_browser.cjs

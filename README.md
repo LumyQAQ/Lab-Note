@@ -11,12 +11,12 @@
 
 | 系统 | 下载 | 启动 |
 | --- | --- | --- |
-| Windows 10 / 11 x64 | [1.7.0-preview.1 预览版 ZIP](https://github.com/LumyQAQ/Lab-Note/releases/download/v1.7.0-preview.1/Lab-Note-1.7.0-preview.1-Windows-x64.zip) | 全部解压后双击 `Start-Lab-Note.cmd`，已附 Python |
-| macOS | [1.7.0 正式版 ZIP](docs/downloads/lab-note-v1.7.0.zip) | 安装 Python 3.9+，双击「启动实验日记.command」 |
+| Windows 10 / 11 x64 | [1.7.1-preview.1 预览版 ZIP](https://github.com/LumyQAQ/Lab-Note/releases/download/v1.7.1-preview.1/Lab-Note-1.7.1-preview.1-Windows-x64.zip) | 全部解压后双击 `Start-Lab-Note.cmd`，已附 Python |
+| macOS | [1.7.1 正式版 ZIP](docs/downloads/lab-note-v1.7.1.zip) | 安装 Python 3.9+，双击「启动实验日记.command」 |
 
 ## 本次更新
 
-新增全生物样本冻存库、-20°C / 4°C 设备和按用户记录关联的患者/供体索引。Transwell 与低吸附 U 底孔板可布局并建立初始实验记录。实验记录可选择三份内置 Word 模板或上传自定义模板导出。「数据与备份」可设置并打开本地备份目录，首页显示极简卡片和单行核对进度。
+冻存实验关联仅采用显式记录和真实培养来源；跨类别关联与库存按样本大类隔离。选中格位的相关列表排除自身，并列出同批次其余格位。关联层级按日期、处理、抗性及亚克隆区分，复苏培养基优先沿用真实来源孔的配方。
 
 ## Windows 本机预览版
 
@@ -32,7 +32,7 @@
 
 默认优先使用 8875，端口冲突时自动改用空闲端口。要切换运行中服务的端口，先执行 `Stop-Lab-Note.cmd`。记录和日志位于 `%LOCALAPPDATA%\Lab Note`。可双击 `Check-Lab-Note.cmd` 用临时库自检。
 
-主分支包含两平台的共用源码。Windows 预览版附件见 [v1.7.0-preview.1](https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.7.0-preview.1)。
+主分支包含两平台的共用源码。Windows 预览版附件见 [v1.7.1-preview.1](https://github.com/LumyQAQ/Lab-Note/releases/tag/v1.7.1-preview.1)。
 <!-- repository-only:end -->
 
 [软件署名及发布校验](AUTHORS.md)
@@ -92,6 +92,6 @@ python3 -m unittest discover -s tests -v
 
 ## 备份与恢复
 
-从旧版升级前，可在旧版的「数据与备份」下载 ZIP 并留存。1.7.0 可以读取旧库。写入压缩历史后，恢复到 1.4.0 需要使用升级前备份。
+从旧版升级前，可在旧版的「数据与备份」下载 ZIP 并留存。1.7.1 可以读取旧库。写入压缩历史后，恢复到 1.4.0 需要使用升级前备份。
 
 在「数据与备份」下载 ZIP。解压后，可在解压目录运行 `shasum -a 256 -c original-file.sha256` 核对数据库。将 `culture.sqlite3` 放到单独的恢复目录；若备份中包含 `word_templates/`，也复制到该恢复目录，用 `python3 app/server.py --data-dir "恢复目录" --port 8890` 打开核验。
